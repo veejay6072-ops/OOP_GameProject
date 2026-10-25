@@ -19,6 +19,10 @@ namespace Gui
             {
                 DrawModeSelection(g);
             }
+            else if (currentState == GameState.DifficultySelect)
+            {
+                DrawDifficultySelection(g);
+            }
             else if (currentState == GameState.CharSelect)
             {
                 DrawCharacterSelection(g);
@@ -199,7 +203,7 @@ namespace Gui
             if (currentState == GameState.FightIntro)
             {
                 bool announcing = introCounter > 40;
-                string title = announcing ? (roundNumber >= 3 ? "FINAL ROUND" : $"ROUND {roundNumber}") : "FIGHT!";
+                string title = announcing ? RoundLabel() : "FIGHT!";
                 DrawAnnouncement(g, title, Color.Yellow);
 
                 if (announcing)

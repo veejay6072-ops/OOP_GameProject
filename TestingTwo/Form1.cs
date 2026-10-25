@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
@@ -15,11 +16,13 @@ namespace Gui
     public partial class Form1 : Form
     {
         // --- GAME FLOW ---
-        private enum GameState { ModeSelect, CharSelect, ArenaSelect, FightIntro, Battle, KO }
+        private enum GameState { ModeSelect, DifficultySelect, CharSelect, ArenaSelect, FightIntro, Battle, KO }
+        private enum CpuDifficulty { Easy, Medium, Hard }
         private GameState currentState = GameState.ModeSelect;
 
         private int selectedMode = 0;
         private bool isVsCPU = false;
+        private CpuDifficulty cpuDifficulty = CpuDifficulty.Medium;   // picked on the difficulty screen (arcade mode only)
         private int p1CharIndex = 0, p2CharIndex = 1;
         private bool p1Locked = false;
         private int selectedArenaIndex = 0;
@@ -43,9 +46,9 @@ namespace Gui
         private string matchResultText = "";
 
         // --- BATTLE STATS ---
-        private int p1Health = 100, p2Health = 100;
-        private int p1RedHealth = 100, p2RedHealth = 100;
-        private const int MaxHealth = 100;           // the full width of a health bar (aged fighters have less than this)
+        private int p1Health = GameConfig.BaseHealth, p2Health = GameConfig.BaseHealth;
+        private int p1RedHealth = GameConfig.BaseHealth, p2RedHealth = GameConfig.BaseHealth;
+        private const int MaxHealth = GameConfig.BaseHealth;           // the full width of a health bar (aged fighters have less than this)
         private int p1ComboHits = 0, p2ComboHits = 0;
         private int p1ComboTimer = 0, p2ComboTimer = 0;
         private int roundTimer = GameConfig.RoundSeconds;
@@ -103,6 +106,8 @@ namespace Gui
         private float bounceCycle = 0;
         private float stageAnimationCycle = 0;
         private Random rng = new Random();
+        private long lastFrameStamp = Stopwatch.GetTimestamp();
+        private float frameSeconds = 1f / 60f;       // real time since the previous engine tick (drives the Chrono-Shadow clock)
         private System.Windows.Forms.Timer renderTimer = new System.Windows.Forms.Timer();
         private System.Windows.Forms.Timer clockTimer = new System.Windows.Forms.Timer();
 
@@ -113,8 +118,6 @@ namespace Gui
             this.Text = "Clash Arena";
             InitArcadeUi();   // sizes the window and builds the arcade cabinet (see Form1.ArcadeUi.cs)
             this.DoubleBuffered = true;
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;
-            this.MaximizeBox = false;
 
             for (int i = 0; i < 45; i++)
             {
@@ -156,6 +159,12 @@ namespace Gui
 
         private void EngineLoop_Tick(object? sender, EventArgs e)
         {
+            long nowStamp = Stopwatch.GetTimestamp();
+            frameSeconds = Math.Min(0.1f, (nowStamp - lastFrameStamp) / (float)Stopwatch.Frequency);
+            lastFrameStamp = nowStamp;
+
+            PollGamepads();   // controllers press the same keys as the keyboard (see Form1.Gamepad.cs)
+
             if (paused)
             {
                 this.Invalidate();

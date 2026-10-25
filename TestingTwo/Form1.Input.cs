@@ -60,10 +60,30 @@ namespace Gui
                 if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)
                 {
                     isVsCPU = (selectedMode == 1);
+                    currentState = isVsCPU ? GameState.DifficultySelect : GameState.CharSelect;   // arcade mode picks the CPU difficulty first
+                    p1Locked = false;
+                    Sfx.Play(650, 90);
+                }
+            }
+            else if (currentState == GameState.DifficultySelect)
+            {
+                if ((e.KeyCode == Keys.Left || e.KeyCode == Keys.Up) && cpuDifficulty > CpuDifficulty.Easy)
+                {
+                    cpuDifficulty--;
+                    Sfx.Play(520, 40);
+                }
+                if ((e.KeyCode == Keys.Right || e.KeyCode == Keys.Down) && cpuDifficulty < CpuDifficulty.Hard)
+                {
+                    cpuDifficulty++;
+                    Sfx.Play(520, 40);
+                }
+                if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)
+                {
                     currentState = GameState.CharSelect;
                     p1Locked = false;
                     Sfx.Play(650, 90);
                 }
+                if (e.KeyCode == Keys.Back) currentState = GameState.ModeSelect;
             }
             else if (currentState == GameState.CharSelect)
             {
@@ -82,7 +102,7 @@ namespace Gui
                             Sfx.Play(750, 100);
                         }
                     }
-                    if (e.KeyCode == Keys.Back) currentState = GameState.ModeSelect;
+                    if (e.KeyCode == Keys.Back) currentState = isVsCPU ? GameState.DifficultySelect : GameState.ModeSelect;
                 }
                 else if (!isVsCPU)
                 {
@@ -120,11 +140,13 @@ namespace Gui
         /// One-shot battle keys. Walking, ducking and blocking are held keys and are read every tick instead
         /// (see ApplyHeldInputs in Form1.Battle.cs).
         ///
-        ///   Player 1:  A / D move (double-tap to dash)   W jump   S duck   F attack   G shadow   T block
-        ///   Player 2:  J / L move (double-tap to dash)   I jump   K duck   U attack   O shadow   P block
+        ///   Player 1:  A / D move (double-tap to dash)   W jump   S duck   Q / E / R attacks   X shadow   T block
+        ///   Player 2:  J / L move (double-tap to dash)   I jump   K duck   U / O / P attacks   M shadow   Y block
         ///
-        /// Attack on the ground chains the combo string, attack while ducking is the down attack,
-        /// attack in the air is the jump attack. Shadow only works in the middle of an attack.
+        /// Ground attacks:  Q = punch, E = cross, R = kick. Chaining them makes a string (Youth 5 hits, Veteran/Elder 3).
+        /// Down attack:     hold S (duck) + Q or E.
+        /// Jump attack:     W (jump) + Q or E while in the air.
+        /// Shadow:          only works in the middle of an attack.
         /// </summary>
         private void HandleBattleKey(Keys key, bool fresh)
         {
@@ -133,16 +155,20 @@ namespace Gui
             if (key == Keys.A) RegisterDirectionTap(1, key, -1f);
             else if (key == Keys.D) RegisterDirectionTap(1, key, 1f);
             else if (key == Keys.W) TryJump(1);
-            else if (key == Keys.F) TryAttack(1);
-            else if (key == Keys.G) TryDropShadow(1);
+            else if (key == Keys.Q) TryAttack(1, 0);
+            else if (key == Keys.E) TryAttack(1, 1);
+            else if (key == Keys.R) TryAttack(1, 2);
+            else if (key == Keys.X) TryDropShadow(1);
 
             if (isVsCPU) return;
 
             if (key == Keys.J) RegisterDirectionTap(2, key, -1f);
             else if (key == Keys.L) RegisterDirectionTap(2, key, 1f);
             else if (key == Keys.I) TryJump(2);
-            else if (key == Keys.U) TryAttack(2);
-            else if (key == Keys.O) TryDropShadow(2);
+            else if (key == Keys.U) TryAttack(2, 0);
+            else if (key == Keys.O) TryAttack(2, 1);
+            else if (key == Keys.P) TryAttack(2, 2);
+            else if (key == Keys.M) TryDropShadow(2);
         }
     }
 }

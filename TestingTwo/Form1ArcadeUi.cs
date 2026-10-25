@@ -31,26 +31,30 @@ namespace Gui
         private static readonly Rectangle ScreenRect = new Rectangle(108, 280, GameWidth, GameHeight);
         private static readonly Rectangle MarqueeInner = new Rectangle(44, 34, 1152, 110);
 
-        private static readonly PointF JoystickPos = new PointF(370f, 1010f);
+        // Two joysticks and two button clusters: Player 1 on the left half of the panel, Player 2 on the right half.
+        private static readonly PointF[] JoystickPos = { new PointF(150f, 1010f), new PointF(1090f, 1010f) };
         private static readonly PointF MenuPos = new PointF(590f, 1000f);
         private static readonly PointF StartPos = new PointF(650f, 1000f);
         private static readonly PointF[] ButtonPos =
         {
-            new PointF(830f, 988f), new PointF(906f, 988f), new PointF(982f, 988f),   // top row    = Player 1: attack, shadow, block
-            new PointF(830f, 1046f), new PointF(906f, 1046f), new PointF(982f, 1046f) // bottom row = Player 2: attack, shadow, block
+            // Player 1: three attacks (top row), then Chrono-Shadow and block (bottom row)
+            new PointF(255f, 988f), new PointF(327f, 988f), new PointF(399f, 988f), new PointF(291f, 1046f), new PointF(363f, 1046f),
+            // Player 2: the same layout, mirrored to the right
+            new PointF(841f, 988f), new PointF(913f, 988f), new PointF(985f, 988f), new PointF(877f, 1046f), new PointF(949f, 1046f)
         };
         private static readonly Color[] ButtonColors =
         {
-            Color.FromArgb(255, 205, 40), Color.FromArgb(255, 140, 30), Color.FromArgb(230, 50, 55),
-            Color.FromArgb(60, 200, 95), Color.FromArgb(60, 125, 235), Color.FromArgb(255, 205, 40)
+            Color.FromArgb(255, 205, 40), Color.FromArgb(255, 140, 30), Color.FromArgb(230, 50, 55), Color.FromArgb(60, 125, 235), Color.FromArgb(60, 200, 95),
+            Color.FromArgb(255, 205, 40), Color.FromArgb(255, 140, 30), Color.FromArgb(230, 50, 55), Color.FromArgb(60, 125, 235), Color.FromArgb(60, 200, 95)
         };
-        private static readonly Keys[] ButtonKeys = { Keys.F, Keys.G, Keys.T, Keys.U, Keys.O, Keys.P };
-        private static readonly string[] ButtonLabels = { "F", "G", "T", "U", "O", "P" };
+        private static readonly Keys[] ButtonKeys = { Keys.Q, Keys.E, Keys.R, Keys.X, Keys.T, Keys.U, Keys.O, Keys.P, Keys.M, Keys.Y };
+        private static readonly string[] ButtonLabels = { "Q", "E", "R", "X", "T", "U", "O", "P", "M", "Y" };
 
-        private static readonly Keys[] JoyLeft = { Keys.Left, Keys.A, Keys.J };
-        private static readonly Keys[] JoyRight = { Keys.Right, Keys.D, Keys.L };
-        private static readonly Keys[] JoyUp = { Keys.Up, Keys.W, Keys.I };
-        private static readonly Keys[] JoyDown = { Keys.Down, Keys.S, Keys.K };
+        // Stick directions per player (index 0 = player 1, 1 = player 2). The arrow keys work the left stick in the menus.
+        private static readonly Keys[][] JoyLeft = { new[] { Keys.Left, Keys.A }, new[] { Keys.J } };
+        private static readonly Keys[][] JoyRight = { new[] { Keys.Right, Keys.D }, new[] { Keys.L } };
+        private static readonly Keys[][] JoyUp = { new[] { Keys.Up, Keys.W }, new[] { Keys.I } };
+        private static readonly Keys[][] JoyDown = { new[] { Keys.Down, Keys.S }, new[] { Keys.K } };
         private static readonly Keys[] MenuKeys = { Keys.Back };
         private static readonly Keys[] StartKeys = { Keys.Enter, Keys.Space };
 
@@ -68,6 +72,8 @@ namespace Gui
 
         private float arcadeScaleX = 1f, arcadeScaleY = 1f;
         private Rectangle screenDevice;                 // where the game picture lands in the window (pixels)
+        private Point arcadeOffset = Point.Empty;       // top-left of the cabinet inside the window (bars when the window shape differs)
+        private Size arcadeSize = new Size(ArcadeW, ArcadeH);   // size of the cabinet in pixels at the current window size
         private Bitmap? arcadeLayer;                   // the cabinet itself, drawn once
         private Bitmap? glassLayer;                     // scanlines, vignette and glare over the screen, drawn once
         private Bitmap? gameBuffer;                     // the game is drawn here every frame
@@ -75,11 +81,11 @@ namespace Gui
 
         private readonly HashSet<Keys> heldKeys = new HashSet<Keys>();
         private readonly Dictionary<Keys, long> keyTapTicks = new Dictionary<Keys, long>();
-        private float joyX = 0f, joyY = 0f;             // eased joystick tilt
+        private readonly float[] joyX = new float[2], joyY = new float[2];   // eased joystick tilt, one per player
 
         private bool OnMenuScreen =>
-            currentState == GameState.ModeSelect || currentState == GameState.CharSelect ||
-            currentState == GameState.ArenaSelect;
+            currentState == GameState.ModeSelect || currentState == GameState.DifficultySelect ||
+            currentState == GameState.CharSelect || currentState == GameState.ArenaSelect;
 
         // ---------------------------------------------------------------
         //  SETUP (called from the Form1 constructor)
@@ -88,19 +94,20 @@ namespace Gui
         {
             AutoScaleMode = AutoScaleMode.None;   // exact pixel size, no surprise Windows display-scaling
 
-            // Shrink the cabinet if the monitor is too small to show it at full size
-            Rectangle area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
-            float fit = Math.Min((area.Width - 24f) / ArcadeW, (area.Height - 80f) / ArcadeH);
-            float scale = Math.Min(1f, Math.Max(0.4f, fit));
-            int w = (int)Math.Round(ArcadeW * scale);
-            int h = (int)Math.Round(ArcadeH * scale);
+            // The window can be resized or maximized: the cabinet scales to fit whatever size it gets.
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
 
-            base.ClientSize = new Size(w, h);
-            arcadeScaleX = w / (float)ArcadeW;
-            arcadeScaleY = h / (float)ArcadeH;
-            screenDevice = Rectangle.Round(new RectangleF(
-                ScreenRect.X * arcadeScaleX, ScreenRect.Y * arcadeScaleY,
-                ScreenRect.Width * arcadeScaleX, ScreenRect.Height * arcadeScaleY));
+            // First size: as big as fits on this monitor (counting the title bar and borders), never bigger than the design size
+            Rectangle area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1366, 768);
+            Size frame = SizeFromClientSize(new Size(1000, 1000)) - new Size(1000, 1000);
+            float fit = Math.Min((area.Width - frame.Width - 16f) / ArcadeW, (area.Height - frame.Height - 16f) / ArcadeH);
+            float scale = Math.Min(1f, Math.Max(0.25f, fit));
+            base.ClientSize = new Size((int)Math.Round(ArcadeW * scale), (int)Math.Round(ArcadeH * scale));
+            MinimumSize = SizeFromClientSize(new Size((int)(ArcadeW * 0.25f), (int)(ArcadeH * 0.25f)));
+            UpdateArcadeLayout();
+            Resize += (sender, e) => { UpdateArcadeLayout(); Invalidate(); };
+            Load += (sender, e) => FitWindowToScreen();   // sizes the window once Windows knows the real screen and title-bar size
 
             BackColor = Color.FromArgb(8, 6, 18);
             StartPosition = FormStartPosition.CenterScreen;
@@ -122,6 +129,52 @@ namespace Gui
                 gameBuffer?.Dispose();
                 screenAttributes.Dispose();
             };
+        }
+
+        // Starts the window at about 80% of the screen it opens on (never bigger than the cabinet's design size),
+        // using the real title-bar and border sizes, and centers it so nothing runs under the taskbar.
+        private const float StartScreenShare = 0.80f;
+
+        private void FitWindowToScreen()
+        {
+            if (WindowState != FormWindowState.Normal) return;
+
+            Rectangle area = Screen.FromControl(this).WorkingArea;
+            Size frame = Size - base.ClientSize;
+            float availW = (area.Width * StartScreenShare) - frame.Width;
+            float availH = (area.Height * StartScreenShare) - frame.Height;
+            float scale = Math.Min(1f, Math.Max(0.25f, Math.Min(availW / ArcadeW, availH / ArcadeH)));
+
+            base.ClientSize = new Size((int)Math.Round(ArcadeW * scale), (int)Math.Round(ArcadeH * scale));
+            Location = new Point(
+                area.X + Math.Max(0, (area.Width - Width) / 2),
+                area.Y + Math.Max(0, (area.Height - Height) / 2));
+            UpdateArcadeLayout();
+            Invalidate();
+        }
+
+        // Fits the cabinet inside the current window (keeping its proportions, centered) and rebuilds the cached layers
+        private void UpdateArcadeLayout()
+        {
+            Size client = base.ClientSize;
+            if (client.Width < 50 || client.Height < 50) return;   // minimized
+
+            float scale = Math.Min(client.Width / (float)ArcadeW, client.Height / (float)ArcadeH);
+            int w = Math.Max(1, (int)Math.Round(ArcadeW * scale));
+            int h = Math.Max(1, (int)Math.Round(ArcadeH * scale));
+            Point offset = new Point((client.Width - w) / 2, (client.Height - h) / 2);
+
+            arcadeScaleX = w / (float)ArcadeW;
+            arcadeScaleY = h / (float)ArcadeH;
+            arcadeSize = new Size(w, h);
+            arcadeOffset = offset;
+            screenDevice = Rectangle.Round(new RectangleF(
+                offset.X + (ScreenRect.X * arcadeScaleX), offset.Y + (ScreenRect.Y * arcadeScaleY),
+                ScreenRect.Width * arcadeScaleX, ScreenRect.Height * arcadeScaleY));
+
+            // Layers are rebuilt on the next paint at the new size
+            arcadeLayer?.Dispose(); arcadeLayer = null;
+            glassLayer?.Dispose(); glassLayer = null;
         }
 
         // A key counts as "lit" while held, and for a moment after a quick tap
@@ -147,6 +200,7 @@ namespace Gui
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
+            g.Clear(BackColor);   // the bars around the cabinet when the window is a different shape
             if (arcadeLayer == null || glassLayer == null) BuildArcadeLayers();
 
             // 1. The game draws itself into its own 1024x620 picture
@@ -159,7 +213,7 @@ namespace Gui
             // 2. Cabinet, then the game picture inside the screen, then the glass on top
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(arcadeLayer!, 0, 0, arcadeLayer!.Width, arcadeLayer.Height);
+            g.DrawImage(arcadeLayer!, arcadeOffset.X, arcadeOffset.Y, arcadeLayer!.Width, arcadeLayer.Height);
             g.DrawImage(gameBuffer!, screenDevice, 0, 0, GameWidth, GameHeight, GraphicsUnit.Pixel, screenAttributes);
             g.DrawImage(glassLayer!, screenDevice.X, screenDevice.Y, glassLayer!.Width, glassLayer.Height);
 
@@ -169,7 +223,7 @@ namespace Gui
 
         private void BuildArcadeLayers()
         {
-            int w = base.ClientSize.Width, h = base.ClientSize.Height;
+            int w = arcadeSize.Width, h = arcadeSize.Height;
 
             arcadeLayer = new Bitmap(w, h, PixelFormat.Format32bppPArgb);
             using (Graphics g = Graphics.FromImage(arcadeLayer))
@@ -404,11 +458,14 @@ namespace Gui
             using (Pen baseRim = new Pen(Color.FromArgb(80, 120, 140), 3f))
             using (SolidBrush mark = new SolidBrush(Color.FromArgb(215, 255, 255, 255)))
             {
-                g.FillEllipse(baseDark, JoystickPos.X - 40, JoystickPos.Y - 40, 80, 80);
-                g.DrawEllipse(baseRim, JoystickPos.X - 40, JoystickPos.Y - 40, 80, 80);
-                foreach (PointF d in new[] { new PointF(-60, 0), new PointF(60, 0), new PointF(0, 52), new PointF(0, -52) })
+                foreach (PointF stick in JoystickPos)
                 {
-                    g.FillEllipse(mark, JoystickPos.X + d.X - 3.5f, JoystickPos.Y + d.Y - 3.5f, 7f, 7f);
+                    g.FillEllipse(baseDark, stick.X - 40, stick.Y - 40, 80, 80);
+                    g.DrawEllipse(baseRim, stick.X - 40, stick.Y - 40, 80, 80);
+                    foreach (PointF d in new[] { new PointF(-60, 0), new PointF(60, 0), new PointF(0, 52), new PointF(0, -52) })
+                    {
+                        g.FillEllipse(mark, stick.X + d.X - 3.5f, stick.Y + d.Y - 3.5f, 7f, 7f);
+                    }
                 }
             }
 
@@ -430,8 +487,13 @@ namespace Gui
             using SolidBrush labelBrush = new SolidBrush(Color.FromArgb(170, 205, 215));
             DrawCentered(g, "MENU", labelFont, labelBrush, MenuPos.X, MenuPos.Y + 34);
             DrawCentered(g, "START", labelFont, labelBrush, StartPos.X, StartPos.Y + 34);
-            DrawCentered(g, "P1", labelFont, labelBrush, 764, ButtonPos[0].Y);
-            DrawCentered(g, "P2", labelFont, labelBrush, 764, ButtonPos[3].Y);
+            DrawCentered(g, "PLAYER 1", labelFont, labelBrush, JoystickPos[0].X, 1076);
+            DrawCentered(g, "PLAYER 2", labelFont, labelBrush, JoystickPos[1].X, 1076);
+
+            // Small key legend above each cluster
+            using Font legendFont = new Font("Segoe UI", 10f, FontStyle.Bold, GraphicsUnit.Pixel);
+            DrawCentered(g, "Q E R ATTACK    X SHADOW    T BLOCK", legendFont, labelBrush, (ButtonPos[0].X + ButtonPos[4].X + 36f) / 2f, 942);
+            DrawCentered(g, "U O P ATTACK    M SHADOW    Y BLOCK", legendFont, labelBrush, (ButtonPos[5].X + ButtonPos[9].X - 36f) / 2f, 942);
         }
 
         // Scanlines, dark edges, rounded corners and a glare streak over the game picture
@@ -486,6 +548,7 @@ namespace Gui
             GraphicsState saved = g.Save();
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TranslateTransform(arcadeOffset.X, arcadeOffset.Y);
             g.ScaleTransform(arcadeScaleX, arcadeScaleY);
             long now = Environment.TickCount64;
 
@@ -497,14 +560,17 @@ namespace Gui
                 g.DrawPath(neon, marquee);
             }
 
-            // Joystick follows the arrow keys / A D W / J L I
-            float targetX = ((IsLit(JoyLeft) ? -1f : 0f) + (IsLit(JoyRight) ? 1f : 0f)) * 17f;
-            float targetY = ((IsLit(JoyUp) ? -1f : 0f) + (IsLit(JoyDown) ? 1f : 0f)) * 11f;
-            joyX += (targetX - joyX) * 0.4f;
-            joyY += (targetY - joyY) * 0.4f;
-            DrawJoystick(g);
+            // Two sticks: player 1 follows A D W S (and the arrow keys in menus), player 2 follows J L I K
+            for (int p = 0; p < 2; p++)
+            {
+                float targetX = ((IsLit(JoyLeft[p]) ? -1f : 0f) + (IsLit(JoyRight[p]) ? 1f : 0f)) * 17f;
+                float targetY = ((IsLit(JoyUp[p]) ? -1f : 0f) + (IsLit(JoyDown[p]) ? 1f : 0f)) * 11f;
+                joyX[p] += (targetX - joyX[p]) * 0.4f;
+                joyY[p] += (targetY - joyY[p]) * 0.4f;
+                DrawJoystick(g, p);
+            }
 
-            // Six action buttons light up with F G T (player 1) and U O P (player 2)
+            // Ten action buttons light up: Q E R X T (player 1) and U O P M Y (player 2)
             for (int i = 0; i < ButtonPos.Length; i++)
             {
                 DrawLiveButton(g, ButtonPos[i].X, ButtonPos[i].Y, 25f, ButtonColors[i], IsLit(new[] { ButtonKeys[i] }), ButtonLabels[i], false);
@@ -517,10 +583,11 @@ namespace Gui
             g.Restore(saved);
         }
 
-        private void DrawJoystick(Graphics g)
+        private void DrawJoystick(Graphics g, int player)
         {
-            PointF pivot = JoystickPos;
-            PointF ball = new PointF(pivot.X + joyX, pivot.Y - 32f + (joyY * 0.6f));
+            PointF pivot = JoystickPos[player];
+            PointF ball = new PointF(pivot.X + joyX[player], pivot.Y - 32f + (joyY[player] * 0.6f));
+            bool first = player == 0;   // player 1 has the red ball, player 2 the blue one
 
             using (Pen shadow = new Pen(Color.FromArgb(120, 0, 0, 0), 13f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
             using (Pen shaft = new Pen(Color.FromArgb(185, 190, 198), 10f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
@@ -536,12 +603,12 @@ namespace Gui
                 using (PathGradientBrush brush = new PathGradientBrush(path))
                 {
                     brush.CenterPoint = new PointF(ball.X - 8f, ball.Y - 10f);
-                    brush.CenterColor = Color.FromArgb(255, 140, 130);
-                    brush.SurroundColors = new[] { Color.FromArgb(185, 25, 30) };
+                    brush.CenterColor = first ? Color.FromArgb(255, 140, 130) : Color.FromArgb(140, 190, 255);
+                    brush.SurroundColors = new[] { first ? Color.FromArgb(185, 25, 30) : Color.FromArgb(30, 80, 190) };
                     g.FillPath(brush, path);
                 }
             }
-            using (Pen rim = new Pen(Color.FromArgb(120, 60, 0, 0), 2f))
+            using (Pen rim = new Pen(first ? Color.FromArgb(120, 60, 0, 0) : Color.FromArgb(120, 0, 0, 60), 2f))
             {
                 g.DrawEllipse(rim, ball.X - R, ball.Y - R, R * 2, R * 2);
             }

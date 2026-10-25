@@ -6,9 +6,9 @@
     internal static class GameConfig
     {
         // --- ROUNDS ---
-        public const int RoundsToWin = 2;              // Best of 3 rounds
-        public const int RoundSeconds = 60;
-        public const int BaseHealth = 100;
+        public const int RoundsToWin = 3;              // First to 3 round wins (one per age: Youth, Veteran, Elder)
+        public const int RoundSeconds = 99;
+        public const int BaseHealth = 120;
         public const int KoDisplayTicks = 170;         // how long the K.O. screen stays up between rounds
 
         // --- THE MORTAL TOLL (aging) ---

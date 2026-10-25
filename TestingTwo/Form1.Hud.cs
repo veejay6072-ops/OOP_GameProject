@@ -30,7 +30,7 @@ namespace Gui
             // Round number and round wins (two pips each, filled once a round is won)
             using (Font rf = new Font("Segoe UI", 8, FontStyle.Bold))
             {
-                string roundLabel = roundNumber >= 3 ? "FINAL ROUND" : $"ROUND {roundNumber}";
+                string roundLabel = RoundLabel();
                 SizeF rs = g.MeasureString(roundLabel, rf);
                 g.DrawString(roundLabel, rf, Brushes.Silver, (w / 2f) - (rs.Width / 2f), topY + 44);
             }
@@ -60,8 +60,8 @@ namespace Gui
             using (Font gf = new Font("Segoe UI", 8, FontStyle.Bold))
             {
                 string helpControls = isVsCPU
-                    ? "P1: [A/D] Move (tap twice = Dash)  [W] Jump  [S] Duck  [F] Attack  [G] Shadow (mid-attack)  [T] Block    |    Opponent: CPU"
-                    : "P1: [A/D/W/S] Move  [F] Attack  [G] Shadow  [T] Block   |   P2: [J/L/I/K] Move  [U] Attack  [O] Shadow  [P] Block";
+                    ? "[A/D] Move (tap twice = Dash)  [W] Jump  [S] Duck  [Q/E/R] Attack  [S+Q/E] Down Atk  [W+Q/E] Jump Atk  [X] Shadow (mid-attack)  [T] Block"
+                    : "P1: [A/D/W/S] Move  [Q/E/R] Attack  [X] Shadow  [T] Block   |   P2: [J/L/I/K] Move  [U/O/P] Attack  [M] Shadow  [Y] Block";
                 g.DrawString(helpControls, gf, Brushes.Silver, 20, this.ClientSize.Height - 26);
             }
         }
@@ -86,11 +86,11 @@ namespace Gui
 
             using (SolidBrush glass = new SolidBrush(Color.FromArgb(160, 20, 20, 30)))
             {
-                g.FillRectangle(glass, barX - 6, topY - 6, barW + 12, barH + 46);
+                g.FillRectangle(glass, barX - 6, topY - 6, barW + 12, barH + 66);
             }
             using (Pen frame = new Pen(Color.FromArgb(80, 255, 255, 255), 1))
             {
-                g.DrawRectangle(frame, barX - 6, topY - 6, barW + 12, barH + 46);
+                g.DrawRectangle(frame, barX - 6, topY - 6, barW + 12, barH + 66);
             }
 
             // The bars fill toward the center. A fighter who has aged has a smaller health pool, so the
@@ -149,27 +149,44 @@ namespace Gui
 
             // Chrono-Shadow meter. The notch marks how much one phantom costs.
             int meterY = topY + barH + 24;
-            int meterH = 8;
-            bool ready = sp.ShadowMeter >= GameConfig.ShadowCost;
-            g.FillRectangle(Brushes.Black, barX, meterY, barW, meterH);
+            int meterH = 16;
+            int charges = (int)(sp.ShadowMeter / GameConfig.ShadowCost);
+            bool ready = charges > 0;
+
+            using (SolidBrush back = new SolidBrush(Color.FromArgb(255, 10, 20, 40)))
+            {
+                g.FillRectangle(back, barX, meterY, barW, meterH);
+            }
 
             int meterW = (int)(barW * (sp.ShadowMeter / GameConfig.MaxShadowMeter));
-            int meterX = left ? barX + (barW - meterW) : barX;
-            using (SolidBrush mb = new SolidBrush(ready ? Color.DeepSkyBlue : Color.SteelBlue))
+            if (meterW > 0)
             {
-                g.FillRectangle(mb, meterX, meterY, meterW, meterH);
+                int meterX = left ? barX + (barW - meterW) : barX;
+                Color m1 = ready ? Color.DeepSkyBlue : Color.SteelBlue;
+                Color m2 = ready ? Color.White : Color.LightSteelBlue;
+                using (LinearGradientBrush mb = new LinearGradientBrush(new Rectangle(meterX, meterY, Math.Max(1, meterW), meterH), m1, m2, LinearGradientMode.Vertical))
+                {
+                    g.FillRectangle(mb, meterX, meterY, meterW, meterH);
+                }
             }
 
             int costW = (int)(barW * (GameConfig.ShadowCost / GameConfig.MaxShadowMeter));
             int notchX = left ? barX + barW - costW : barX + costW;
-            g.DrawLine(Pens.White, notchX, meterY - 2, notchX, meterY + meterH + 2);
-
-            using (Font lf = new Font("Segoe UI", 7, FontStyle.Bold))
+            g.DrawLine(Pens.White, notchX, meterY - 3, notchX, meterY + meterH + 3);
+            using (Pen meterBorder = new Pen(ready ? Color.DeepSkyBlue : Color.LightSteelBlue, 2))
             {
-                string label = ready ? "CHRONO-SHADOW  READY" : "CHRONO-SHADOW";
+                g.DrawRectangle(meterBorder, barX, meterY, barW, meterH);
+            }
+
+            using (Font lf = new Font("Segoe UI", 9, FontStyle.Bold))
+            {
+                string label = ready ? $"CHRONO-SHADOW  x{charges}  READY" : "CHRONO-SHADOW";
                 SizeF ls = g.MeasureString(label, lf);
                 float lx = left ? barX : barX + barW - ls.Width;
-                g.DrawString(label, lf, ready ? Brushes.DeepSkyBlue : Brushes.SlateGray, lx, meterY + 9);
+                float ly = meterY + meterH + 3;
+                Brush main = ready ? Brushes.DeepSkyBlue : Brushes.White;
+                g.DrawString(label, lf, Brushes.Black, lx + 1, ly + 1);   // outline so it reads on any background
+                g.DrawString(label, lf, main, lx, ly);
             }
         }
 

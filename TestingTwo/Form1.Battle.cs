@@ -30,14 +30,31 @@ namespace Gui
         private string FighterDisplayName(int w)
         {
             string name = GameData.Roster[CharIndex(w)].Name;
-            return (w == 2 && isVsCPU) ? "CPU (" + name + ")" : name;
+            return (w == 2 && isVsCPU) ? "CPU " + cpuDifficulty.ToString().ToUpperInvariant() + " (" + name + ")" : name;
         }
 
         // =====================================================================
         //  MATCH AND ROUND FLOW
         // =====================================================================
+        // Each fighter keeps their own age. Only the fighter who LOSES a round moves to the next stage;
+        // the winner stays the same age. A drawn round changes nothing.
+        private AgeStage p1Age = AgeStage.Youth, p2Age = AgeStage.Youth;
+
+        private static AgeStage NextAge(AgeStage age)
+        {
+            return age == AgeStage.Youth ? AgeStage.Veteran : AgeStage.Elder;
+        }
+
+        // "FINAL ROUND" only when it is the decider (both fighters one win away); otherwise "ROUND n"
+        private string RoundLabel()
+        {
+            bool decider = p1RoundWins >= GameConfig.RoundsToWin - 1 && p2RoundWins >= GameConfig.RoundsToWin - 1;
+            return decider ? "FINAL ROUND" : $"ROUND {roundNumber}";
+        }
+
         private void StartMatch()
         {
+            p1Age = p2Age = AgeStage.Youth;
             roundNumber = 1;
             p1RoundWins = p2RoundWins = 0;
             p1LostRound = p2LostRound = false;
@@ -50,14 +67,12 @@ namespace Gui
         }
 
         /// <summary>
-        /// Round 1: both fighters are Youth. Round 2: whoever lost round 1 is a Veteran.
-        /// Round 3 (only reached at 1-1, so both have lost once): both fighters are Elders.
+        /// Everyone starts as Youth. When a fighter loses a round they age one stage (Youth -> Veteran -> Elder);
+        /// the winner of the round keeps their current age.
         /// </summary>
         private AgeStage AgeForRound(int w, int round)
         {
-            if (round <= 1) return AgeStage.Youth;
-            if (round == 2) return (w == 1 ? p1LostRound : p2LostRound) ? AgeStage.Veteran : AgeStage.Youth;
-            return AgeStage.Elder;
+            return w == 1 ? p1Age : p2Age;
         }
 
         private void StartRound()
@@ -124,8 +139,8 @@ namespace Gui
                 ActionOf(loser) = CombatRules.ActDefeated;
                 ActionTimerOf(loser) = 60;
 
-                if (winner == 1) { p1RoundWins++; p2LostRound = true; }
-                else { p2RoundWins++; p1LostRound = true; }
+                if (winner == 1) { p1RoundWins++; p2LostRound = true; p2Age = NextAge(p2Age); }
+                else { p2RoundWins++; p1LostRound = true; p1Age = NextAge(p1Age); }
             }
             if (p1Health <= 0 && p2Health <= 0) koHeadline = "DOUBLE K.O.";
 
@@ -167,8 +182,41 @@ namespace Gui
         // =====================================================================
         //  CPU
         // =====================================================================
+        // How each difficulty plays. "1 in N" odds are rolled every game tick (60 per second), so a bigger N is rarer.
+        private readonly struct CpuProfile
+        {
+            public readonly int DecisionMin, DecisionMax;   // ticks between decisions (smaller = reacts faster)
+            public readonly int AttackRoll;                 // out of 10: chance to attack when it has nothing better to do
+            public readonly int ReactRoll;                  // out of 10: chance to defend against an incoming attack
+            public readonly int DuckPick;                   // out of 10: duck (instead of block) against a high attack
+            public readonly int StringOdds;                 // 1 in N per tick to keep a combo string going
+            public readonly int ShadowOdds;                 // 1 in N per tick to drop a Chrono-Shadow mid-attack (0 = never)
+            public readonly int ApproachOdds;               // 1 in N: jump (or dash) while closing in
+            public readonly bool DuckSweep;                 // answers its own duck with a down attack
+
+            public CpuProfile(int decisionMin, int decisionMax, int attackRoll, int reactRoll, int duckPick,
+                int stringOdds, int shadowOdds, int approachOdds, bool duckSweep)
+            {
+                DecisionMin = decisionMin; DecisionMax = decisionMax; AttackRoll = attackRoll; ReactRoll = reactRoll;
+                DuckPick = duckPick; StringOdds = stringOdds; ShadowOdds = shadowOdds; ApproachOdds = approachOdds; DuckSweep = duckSweep;
+            }
+        }
+
+        //                                                              decide    atk react duck string shadow approach sweep
+        private static CpuProfile ProfileFor(CpuDifficulty difficulty)
+        {
+            return difficulty switch
+            {
+                CpuDifficulty.Easy => new CpuProfile(20, 36, 3, 1, 3, 30, 0, 40, false),
+                CpuDifficulty.Hard => new CpuProfile(4, 9, 8, 8, 7, 4, 18, 8, true),
+                _ => new CpuProfile(8, 18, 6, 4, 5, 6, 45, 12, true)   // Medium plays exactly like the old CPU
+            };
+        }
+
         private void UpdateCPUAI()
         {
+            CpuProfile cp = ProfileFor(cpuDifficulty);
+
             if (cpuBlockTimer > 0) cpuBlockTimer--;
             if (cpuDuckTimer > 0) cpuDuckTimer--;
 
@@ -185,21 +233,21 @@ namespace Gui
             // Mid-attack: sometimes keep the string going, sometimes leave a Chrono-Shadow behind
             if (CombatRules.IsAttack(act))
             {
-                if (rng.Next(0, 6) == 0) TryAttack(2);
-                else if (p2Sprite.ShadowMeter >= GameConfig.ShadowCost && rng.Next(0, 45) == 0) TryDropShadow(2);
+                if (rng.Next(0, cp.StringOdds) == 0) TryAttack(2, CpuAttackButton());
+                else if (cp.ShadowOdds > 0 && p2Sprite.ShadowMeter >= GameConfig.ShadowCost && rng.Next(0, cp.ShadowOdds) == 0) TryDropShadow(2);
                 return;
             }
 
             // Halfway through a duck, answer with a low sweep
-            if (cpuDuckTimer == 5 && dist < 170f)
+            if (cp.DuckSweep && cpuDuckTimer == 5 && dist < 170f)
             {
-                TryAttack(2);
+                TryAttack(2, rng.Next(0, 2));   // still ducking, so this is the down attack (Q or E)
                 return;
             }
 
             cpuDecisionTimer--;
             if (cpuDecisionTimer > 0) return;
-            cpuDecisionTimer = rng.Next(8, 18);
+            cpuDecisionTimer = rng.Next(cp.DecisionMin, cp.DecisionMax);
             cpuMoveDir = 0f;
 
             bool p1Attacking = CombatRules.IsAttack(p1Action);
@@ -207,23 +255,30 @@ namespace Gui
             if (dist > 200f)
             {
                 cpuMoveDir = toward;
-                int r = rng.Next(0, 12);
+                int r = rng.Next(0, cp.ApproachOdds);
                 if (r == 0) TryJump(2);
                 else if (r == 1) TryDash(2, toward);
             }
-            else if (p1Attacking && rng.Next(0, 10) < 4)
+            else if (p1Attacking && rng.Next(0, 10) < cp.ReactRoll)
             {
                 // React to an incoming attack: duck under high ones, block the rest
-                if (CombatRules.GetMove(p1Action).High && rng.Next(0, 2) == 0) cpuDuckTimer = 14;
+                if (CombatRules.GetMove(p1Action).High && rng.Next(0, 10) < cp.DuckPick) cpuDuckTimer = 14;
                 else cpuBlockTimer = 18;
             }
             else
             {
                 int c = rng.Next(0, 10);
-                if (c < 6) TryAttack(2);
-                else if (c == 6) cpuDuckTimer = 10;
-                else if (c == 7) cpuBlockTimer = 20;
-                else cpuMoveDir = -toward;
+                if (c < cp.AttackRoll)
+                {
+                    TryAttack(2, CpuAttackButton());
+                }
+                else
+                {
+                    int d = rng.Next(0, 4);
+                    if (d == 0) cpuDuckTimer = 10;
+                    else if (d == 1) cpuBlockTimer = 20;
+                    else cpuMoveDir = -toward;
+                }
             }
         }
 
@@ -236,7 +291,7 @@ namespace Gui
             ApplyFighterInput(1, IsHeld(Keys.A), IsHeld(Keys.D), IsHeld(Keys.S), IsHeld(Keys.T));
 
             if (isVsCPU) ApplyFighterInput(2, cpuMoveDir < 0f, cpuMoveDir > 0f, cpuDuckTimer > 0, cpuBlockTimer > 0);
-            else ApplyFighterInput(2, IsHeld(Keys.J), IsHeld(Keys.L), IsHeld(Keys.K), IsHeld(Keys.P));   // P2: J/L move, K duck, P block
+            else ApplyFighterInput(2, IsHeld(Keys.J), IsHeld(Keys.L), IsHeld(Keys.K), IsHeld(Keys.Y));   // P2: J/L move, K duck, Y block
         }
 
         private void ApplyFighterInput(int w, bool left, bool right, bool down, bool block)
@@ -307,49 +362,72 @@ namespace Gui
             SpawnShockwave(new PointF(PosX(w) + 54, PosY(w) + 170), 60, GameData.Roster[CharIndex(w)].AuraColor);
         }
 
+        // Is the fighter holding the duck key right now? (the held key, not the animation, so S + attack pressed
+        // in the same instant still counts as a down attack)
+        private bool HoldingDown(int w)
+        {
+            if (w == 1) return IsHeld(Keys.S);
+            return isVsCPU ? cpuDuckTimer > 0 : IsHeld(Keys.K);
+        }
+
+        private int CpuAttackButton()
+        {
+            return rng.Next(0, (OnGround(2) && !HoldingDown(2)) ? 3 : 2);   // R (kick) only exists on the ground
+        }
+
         /// <summary>
-        /// One attack button, three behaviours: on the ground it chains the combo string, while ducking it is the
-        /// down attack, and in the air it is the jump attack.
+        /// Three attack buttons: button 0 = Q/U (punch), 1 = E/O (cross), 2 = R/P (kick).
+        ///   On the ground  : chains into a string (Youth up to 5 hits, Veteran / Elder up to 3)
+        ///   Holding duck   : Q or E is the down attack
+        ///   In the air     : Q or E is the jump attack (W + Q/E)
         /// </summary>
-        private void TryAttack(int w)
+        private void TryAttack(int w, int button)
         {
             int action = ActionOf(w);
             if (action == CombatRules.ActHurt || action == CombatRules.ActWallSplat || action == CombatRules.ActDefeated) return;
 
             Player sp = SpriteOf(w);
+            bool airborne = !OnGround(w) || VelY(w) < 0f;   // VelY < 0: the jump key was pressed this very tick
             int move;
 
-            if (!OnGround(w))
+            if (airborne)
             {
-                if (action != CombatRules.ActNone) return;
+                if (button == 2 || action != CombatRules.ActNone) return;
                 move = CombatRules.ActJumpAttack;
+                chainIndex[w] = 0;
             }
-            else if (sp.IsDucking)
+            else if (HoldingDown(w))
             {
-                if (action != CombatRules.ActNone) return;
+                if (button == 2 || action != CombatRules.ActNone) return;
                 move = CombatRules.ActDownAttack;
+                chainIndex[w] = 0;
             }
             else
             {
-                int[] str = CombatRules.ComboString(sp.CurrentAge);
-                int next;
+                int limit = CombatRules.ComboString(sp.CurrentAge).Length;   // 5 for Youth, 3 for Veteran and Elder
+                int hitsIn;
 
                 if (action == CombatRules.ActNone)
                 {
-                    next = chainTimer[w] > 0 ? chainIndex[w] : 0;
+                    hitsIn = chainTimer[w] > 0 ? chainIndex[w] : 0;
                 }
                 else if (CombatRules.IsAttack(action) && chainTimer[w] > 0 && ActionTimerOf(w) <= CombatRules.GetMove(action).CancelAt)
                 {
-                    next = chainIndex[w];   // the current hit is far enough along to chain into the next one
+                    hitsIn = chainIndex[w];   // the current hit is far enough along to chain into the next one
                 }
                 else
                 {
                     return;
                 }
 
-                if (next >= str.Length) next = 0;
-                move = str[next];
-                chainIndex[w] = next + 1;
+                if (hitsIn >= limit)
+                {
+                    if (action != CombatRules.ActNone) return;   // the string is full: it ends here
+                    hitsIn = 0;                                  // ...and a new one can start once the last hit is over
+                }
+
+                move = button == 0 ? CombatRules.ActPunch1 : (button == 1 ? CombatRules.ActPunch2 : CombatRules.ActKick);
+                chainIndex[w] = hitsIn + 1;
             }
 
             StartMove(w, move);
@@ -415,7 +493,7 @@ namespace Gui
 
             SpawnShockwave(new PointF(PosX(w) + 54, PosY(w) + 120), 100, Color.DeepSkyBlue);
             SpawnImpactParticles(PosX(w) + 54, PosY(w) + 100, 14, Color.DeepSkyBlue);
-            Sfx.Play(1200, 90);
+            Sfx.ShadowDrop();
         }
 
         // =====================================================================
@@ -687,14 +765,14 @@ namespace Gui
             {
                 ChronoShadow s = shadows[i];
                 bool wasExecuted = s.Executed;
-                s.Update(1f / 60f);
+                s.Update(frameSeconds);   // real seconds, so a phantom wakes after exactly 3 s whatever the frame rate
 
                 if (s.Executed)
                 {
                     if (!wasExecuted)
                     {
                         s.ExecTicks = 0;
-                        Sfx.Play(1500, 100);
+                        Sfx.ShadowAwaken();
                         SpawnShockwave(new PointF(s.X + 54, s.Y + 120), 120, Color.DeepSkyBlue);
                         SpawnImpactParticles(s.X + 54, s.Y + 100, 20, Color.DeepSkyBlue);
                     }

@@ -1,4 +1,6 @@
-﻿using System;
+﻿using System.Drawing.Drawing2D;
+
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -29,7 +31,7 @@ namespace Gui
             g.DrawString("[ ARROW KEYS ] Choose Mode   |   [ ENTER ] Confirm", new Font("Segoe UI", 12, FontStyle.Bold), Brushes.Gold, w / 2 - 210, h - 70);
         }
 
-        private void DrawModeCard(Graphics g, int x, int y, int w, int h, string title, string sub, bool isSelected, Color neon)
+        private void DrawModeCard(Graphics g, int x, int y, int w, int h, string title, string sub, bool isSelected, Color neon, string selectedText = "★ READY TO FIGHT ★")
         {
             using (Pen p = new Pen(isSelected ? neon : Color.FromArgb(50, 50, 65), isSelected ? 4 : 2)) g.DrawRectangle(p, x, y, w, h);
             using (LinearGradientBrush bg = new LinearGradientBrush(new Rectangle(x, y, w, h),
@@ -42,7 +44,43 @@ namespace Gui
             using (Font sf = new Font("Segoe UI", 10)) g.DrawString(sub, sf, Brushes.Silver, x + 25, y + 90);
             if (isSelected)
             {
-                using (Font selF = new Font("Impact", 16)) g.DrawString("★ READY TO FIGHT ★", selF, new SolidBrush(neon), x + 50, y + 180);
+                using (Font selF = new Font("Impact", 16)) g.DrawString(selectedText, selF, new SolidBrush(neon), x + 50, y + 200);
+            }
+        }
+
+        private void DrawDifficultySelection(Graphics g)
+        {
+            int w = this.ClientSize.Width, h = this.ClientSize.Height;
+            g.Clear(Color.FromArgb(10, 10, 15));
+
+            using (Font titleF = new Font("Impact", 34, FontStyle.Italic))
+            {
+                const string header = "CHOOSE CPU DIFFICULTY";
+                float titleX = (w / 2f) - (g.MeasureString(header, titleF).Width / 2f);
+                g.DrawString(header, titleF, Brushes.Gold, titleX, 45);
+            }
+
+            string[] names = { "EASY", "MEDIUM", "HARD" };
+            string[] notes =
+            {
+                "Slow to react and rarely defends.\nNever uses Chrono-Shadow.\nGood for learning the controls.",
+                "A balanced opponent that blocks,\nducks and mixes up its attacks.\nUses Chrono-Shadow now and then.",
+                "Reacts fast, blocks and ducks smartly,\ndashes in often, chains long strings\nand drops Chrono-Shadows on you."
+            };
+            Color[] neon = { Color.LimeGreen, Color.Gold, Color.Crimson };
+
+            int cardW = 270, cardH = 260, gap = 30, y = 140;
+            int startX = (w - ((cardW * 3) + (gap * 2))) / 2;
+            for (int i = 0; i < 3; i++)
+            {
+                DrawModeCard(g, startX + (i * (cardW + gap)), y, cardW, cardH, names[i], notes[i], (int)cpuDifficulty == i, neon[i], "★ SELECTED ★");
+            }
+
+            const string prompt = "[ ARROWS ] Choose Difficulty   |   [ ENTER ] Confirm   |   [ BACKSPACE ] Back";
+            using (Font promptF = new Font("Segoe UI", 12, FontStyle.Bold))
+            {
+                float px = (w / 2f) - (g.MeasureString(prompt, promptF).Width / 2f);
+                g.DrawString(prompt, promptF, Brushes.Gold, px, h - 70);
             }
         }
 
@@ -79,7 +117,6 @@ namespace Gui
                 using (SolidBrush b = new SolidBrush(Color.Black)) g.FillRectangle(b, cx + 2, startY + cardH - 75, cardW - 4, 73);
                 g.DrawString(GameData.Roster[i].Name, new Font("Impact", 13), Brushes.White, cx + 10, startY + cardH - 70);
                 g.DrawString(GameData.Roster[i].Style, new Font("Segoe UI", 8), Brushes.LightGray, cx + 10, startY + cardH - 48);
-                g.DrawString("SKILL: " + GameData.Roster[i].SpecialSkill, new Font("Segoe UI", 7, FontStyle.Bold), new SolidBrush(GameData.Roster[i].AuraColor), cx + 10, startY + cardH - 30);
 
                 if (isP1) g.DrawString(p1Locked ? "★ P1 LOCKED" : "► P1 SELECT", new Font("Impact", 11), Brushes.Cyan, cx + 20, startY + 12);
                 if (isP2 && p1Locked && !isVsCPU) g.DrawString("► P2 SELECT", new Font("Impact", 11), Brushes.Crimson, cx + 20, startY + 30);

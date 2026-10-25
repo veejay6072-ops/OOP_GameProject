@@ -587,21 +587,39 @@ namespace Gui
             bool wantShadow = lower.Contains("shadow");
             string fileName = parts[parts.Length - 1];
 
-            string? best = null;
-            int bestScore = int.MinValue;
-            foreach (string p in pngs)
-            {
-                if (!string.Equals(Path.GetFileName(p), fileName, StringComparison.OrdinalIgnoreCase)) continue;
-                string n = p.Replace('\\', '/');
-                if (n.IndexOf("/" + owner + "/", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (!AgeMatches(n, age)) continue;
-                if ((n.IndexOf("shadow", StringComparison.OrdinalIgnoreCase) >= 0) != wantShadow) continue;
+            // The scene's loose young pictures (Aloy/Attack.png, Samurai/Shield.png, Samurai/Dead.png ...) have other
+            // names in the full sprite sets, so the same picture is looked for under its set name too.
+            List<string> names = new List<string> { fileName };
+            if (FileAlternatives.TryGetValue(fileName, out string[]? alternatives)) names.AddRange(alternatives);
 
-                int score = (n.Contains("/normal/", StringComparison.OrdinalIgnoreCase) ? 100 : 0) - n.Length;
-                if (score > bestScore) { bestScore = score; best = p; }
+            foreach (string name in names)
+            {
+                string? best = null;
+                int bestScore = int.MinValue;
+                foreach (string p in pngs)
+                {
+                    if (!string.Equals(Path.GetFileName(p), name, StringComparison.OrdinalIgnoreCase)) continue;
+                    string n = p.Replace('\\', '/');
+                    if (n.IndexOf("/" + owner + "/", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    if (!AgeMatches(n, age)) continue;
+                    if ((n.IndexOf("shadow", StringComparison.OrdinalIgnoreCase) >= 0) != wantShadow) continue;
+
+                    int score = (n.Contains("/normal/", StringComparison.OrdinalIgnoreCase) ? 100 : 0) - n.Length;
+                    if (score > bestScore) { bestScore = score; best = p; }
+                }
+                if (best != null) return best;
             }
-            return best;
+            return null;
         }
+
+        // Picture names in the scene -> the name of the same picture in the full sprite sets
+        private static readonly Dictionary<string, string[]> FileAlternatives = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Attack.png"] = new[] { "Attack_1.png" },
+            ["Shield.png"] = new[] { "Block.png" },
+            ["Dead.png"] = new[] { "Death.png" },
+            ["Death.png"] = new[] { "Dead.png" }
+        };
 
         private static Bitmap ToFastBitmap(Bitmap original)
         {
