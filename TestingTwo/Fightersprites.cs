@@ -56,43 +56,90 @@ namespace Gui
             }
         }
 
-        public static int FrameCount(string animation)
-        {
-            return FrameCount(0, animation);
-        }
-
         /// <summary>Frame count for the character of a given age, as defined in the Godot scene.</summary>
-        public static int FrameCountForAge(AgeStage age, string animation)
+        public static int FrameCountForAge(int fighterIndex, AgeStage age, string animation)
         {
             EnsureLoaded();
-            int godotFrames = GodotAtlas.FrameCount(age, animation);
-            return godotFrames > 0 ? godotFrames : FrameCount(0, animation);
+            int godotFrames = GodotAtlas.FrameCount(fighterIndex, age, animation);
+            return godotFrames > 0 ? godotFrames : FrameCount(fighterIndex, animation);
         }
 
         public static int FrameCount(int fighterIndex, string animation)
         {
-            int godotFrames = GodotAtlas.FrameCount(AgeStage.Youth, animation);
+            int godotFrames = GodotAtlas.FrameCount(fighterIndex, AgeStage.Youth, animation);
             if (godotFrames > 0) return godotFrames;
             if (Animations.TryGetValue(animation, out var data))
                 return data.Frames;
             return 1;
         }
 
+        // The sprite is drawn this much bigger than the old 46x50 cell (see DrawBitmap)
+        private const float SizeBoost = 1.15f;
+
+        /// <summary>How tall a fighter is drawn on screen, in pixels (used to place the countdown above a phantom).</summary>
+        public static float DrawnHeight(int fighterIndex, AgeStage age, float scale = 3f)
+        {
+            return CellH * SizeBoost * scale;
+        }
+
         public static void Draw(Graphics g, int fighterIndex, string animation, int frame, float centerX, float footY, float scale, bool faceRight, bool hurt, AgeStage age = AgeStage.Youth)
         {
-            DrawInternal(g, animation, frame, centerX, footY, scale, faceRight, hurt ? hurtAttributes : normalAttributes, age);
+            DrawInternal(g, fighterIndex, animation, frame, centerX, footY, scale, faceRight, hurt ? hurtAttributes : normalAttributes, age, true);
         }
 
         /// <summary>Draws the same sprite as a flat, see-through silhouette in one color (used for the dash after-images).</summary>
-        public static void DrawGhost(Graphics g, string animation, int frame, float centerX, float footY, float scale, bool faceRight, Color tint, int alpha, AgeStage age = AgeStage.Youth)
+        public static void DrawGhost(Graphics g, int fighterIndex, string animation, int frame, float centerX, float footY, float scale, bool faceRight, Color tint, int alpha, AgeStage age = AgeStage.Youth)
         {
             using (ImageAttributes ghost = MakeGhostAttributes(tint, alpha))
             {
-                DrawInternal(g, animation, frame, centerX, footY, scale, faceRight, ghost, age);
+                DrawInternal(g, fighterIndex, animation, frame, centerX, footY, scale, faceRight, ghost, age, false);
             }
         }
 
-        private static void DrawInternal(Graphics g, string animation, int frame, float centerX, float footY, float scale, bool faceRight, ImageAttributes attributes, AgeStage age)
+        /// <summary>Number of frames in the phantom (Chrono-Shadow) version of an animation.</summary>
+        public static int PhantomFrameCount(int fighterIndex, AgeStage age, string animation)
+        {
+            EnsureLoaded();
+            int n = GodotAtlas.ShadowFrameCount(fighterIndex, age, animation);
+            return n > 0 ? n : FrameCountForAge(fighterIndex, age, animation);
+        }
+
+        /// <summary>
+        /// Draws a Chrono-Shadow phantom: the shadow_mechanic sprite set of the fighter's age when the Godot scene
+        /// has it (Yshadowver / Mshadowver / Oshadowver), otherwise a glowing blue silhouette of the normal sprite.
+        /// </summary>
+        public static void DrawPhantom(Graphics g, int fighterIndex, string animation, int frame, float centerX, float footY, float scale, bool faceRight, AgeStage age, int alpha)
+        {
+            EnsureLoaded();
+            if (GodotAtlas.Available && GodotAtlas.TryGetShadowFrame(fighterIndex, age, animation, frame, out Bitmap? image, out Rectangle source) && image != null)
+            {
+                using (ImageAttributes attributes = MakePhantomAttributes(alpha))
+                {
+                    DrawBitmap(g, image, source, centerX, footY, scale, faceRight, attributes);
+                }
+                return;
+            }
+            DrawGhost(g, fighterIndex, animation, frame, centerX, footY, scale, faceRight, Color.DeepSkyBlue, alpha, age);
+        }
+
+        // Translucent, with a cold blue push so every phantom reads as the same kind of thing
+        private static ImageAttributes MakePhantomAttributes(int alpha)
+        {
+            ImageAttributes attributes = new ImageAttributes();
+            attributes.SetWrapMode(WrapMode.TileFlipXY);
+            float a = Math.Clamp(alpha, 0, 255) / 255f;
+            attributes.SetColorMatrix(new ColorMatrix(new float[][]
+            {
+                new float[] { 0.65f, 0f, 0f, 0f, 0f },
+                new float[] { 0f, 0.90f, 0f, 0f, 0f },
+                new float[] { 0f, 0f, 1f, 0f, 0f },
+                new float[] { 0f, 0f, 0f, a, 0f },
+                new float[] { 0.05f, 0.18f, 0.40f, 0f, 1f }
+            }));
+            return attributes;
+        }
+
+        private static void DrawInternal(Graphics g, int fighterIndex, string animation, int frame, float centerX, float footY, float scale, bool faceRight, ImageAttributes attributes, AgeStage age, bool showPlaceholder)
         {
             EnsureLoaded();
 
@@ -103,10 +150,18 @@ namespace Gui
             //    If this age has no such animation (for example no "hurt"), the standing pose is used.
             if (GodotAtlas.Available)
             {
-                if (!GodotAtlas.TryGetFrame(age, animation, frame, out image, out source))
+                if (!GodotAtlas.TryGetFrame(fighterIndex, age, animation, frame, out image, out source))
                 {
-                    GodotAtlas.TryGetFrame(age, "Idle", 0, out image, out source);
+                    GodotAtlas.TryGetFrame(fighterIndex, age, "Idle", 0, out image, out source);
                 }
+            }
+
+            // The strip pictures below are only Vyte's. Never show them for another fighter: that is what made
+            // Mokutin look like Vyte whenever his pictures could not be found. A magenta box marks the problem instead.
+            if (image == null && fighterIndex != 0)
+            {
+                if (showPlaceholder) DrawMissingPlaceholder(g, centerX, footY, scale);
+                return;
             }
 
             // 2. Otherwise use the separate strip pictures, if they exist.
@@ -123,9 +178,14 @@ namespace Gui
                 source = new Rectangle(currentFrame * cellW, 0, cellW, strip.Height);
             }
 
+            DrawBitmap(g, image, source, centerX, footY, scale, faceRight, attributes);
+        }
+
+        private static void DrawBitmap(Graphics g, Bitmap image, Rectangle source, float centerX, float footY, float scale, bool faceRight, ImageAttributes attributes)
+        {
             // Normalizes the sprite to the original character size
             float sizeCorrection = (float)CellH / source.Height;
-            sizeCorrection *= 1.15f; // Tweak this decimal to make the character slightly bigger or smaller
+            sizeCorrection *= SizeBoost; // Tweak SizeBoost to make the character slightly bigger or smaller
 
             int w = (int)Math.Round(source.Width * scale * sizeCorrection);
             int h = (int)Math.Round(source.Height * scale * sizeCorrection);
@@ -144,6 +204,18 @@ namespace Gui
 
             g.DrawImage(image, dest, source.X, source.Y, source.Width, source.Height, GraphicsUnit.Pixel, attributes);
             g.Restore(savedState);
+        }
+
+        private static void DrawMissingPlaceholder(Graphics g, float centerX, float footY, float scale)
+        {
+            float h = CellH * SizeBoost * scale;
+            float w = h * 0.45f;
+            using (Pen outline = new Pen(Color.Magenta, 3))
+            using (Font f = new Font("Segoe UI", 8, FontStyle.Bold))
+            {
+                g.DrawRectangle(outline, centerX - (w / 2f), footY - h, w, h);
+                g.DrawString("NO SPRITE", f, Brushes.Magenta, centerX - (w / 2f), footY - (h / 2f));
+            }
         }
 
         private static void EnsureLoaded()

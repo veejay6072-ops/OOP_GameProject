@@ -15,7 +15,7 @@ namespace Gui
     public partial class Form1 : Form
     {
         // --- GAME FLOW ---
-        private enum GameState { ModeSelect, CharSelect, ArenaSelect, Armory, FightIntro, Battle, KO }
+        private enum GameState { ModeSelect, CharSelect, ArenaSelect, FightIntro, Battle, KO }
         private GameState currentState = GameState.ModeSelect;
 
         private int selectedMode = 0;
@@ -24,34 +24,52 @@ namespace Gui
         private bool p1Locked = false;
         private int selectedArenaIndex = 0;
 
-        // --- LOADOUTS AND ARMORY STATE ---
-        private Loadout p1Loadout = new Loadout();
-        private Loadout p2Loadout = new Loadout();
-        private Loadout ActiveLoadout => armoryPlayer == 1 ? p1Loadout : p2Loadout;
-        private int armoryPlayer = 1;
-        private int armoryTab = 0;
-        private int armoryCursor = 0;
-        private string armoryMessage = "";
-        private int armoryFlash = 0;
-        private Color armoryFlashColor = Color.Gold;
-
         // Arena select animation
         private float arenaSlide = 0f;          // eased position of the selector (in card indexes)
         private int arenaPrevIndex = 0;         // arena that is sliding out of the preview box
         private int arenaTransitionDir = 1;     // +1 = new arena slides in from the right
         private float arenaTransition = 1f;     // 0 = just changed, 1 = finished
-        private string rewardText = "";
+
+        // --- ROUNDS ("THE MORTAL TOLL") ---
+        private int roundNumber = 1;                 // 1..3
+        private int p1RoundWins = 0, p2RoundWins = 0;
+        private bool p1LostRound = false, p2LostRound = false;   // has this fighter lost a round yet?
+        private bool matchOver = false;
+        private int lastRoundWinner = 0;             // 0 = draw
+        private int koCounter = 0;
+        private string koHeadline = "K.O.";
+        private string roundResultText = "";
+        private string nextRoundText = "";
+        private string matchResultText = "";
 
         // --- BATTLE STATS ---
         private int p1Health = 100, p2Health = 100;
         private int p1RedHealth = 100, p2RedHealth = 100;
-        private const int MaxHealth = 100;
-        private int p1Heat = 60, p2Heat = 60;
-        private const int MaxHeat = 100;
+        private const int MaxHealth = 100;           // the full width of a health bar (aged fighters have less than this)
         private int p1ComboHits = 0, p2ComboHits = 0;
         private int p1ComboTimer = 0, p2ComboTimer = 0;
-        private int roundTimer = 60;
+        private int roundTimer = GameConfig.RoundSeconds;
+
+        // --- PER-FIGHTER COMBAT STATE (index 1 = player 1, index 2 = player 2, index 0 unused) ---
+        private readonly bool[] facingRight = { true, true, false };
+        private readonly int[] pendingMove = new int[3];      // attack waiting for its hit frame
+        private readonly int[] pendingDelay = new int[3];
+        private readonly int[] dueMove = new int[3];
+        private readonly int[] chainIndex = new int[3];       // position inside the combo string
+        private readonly int[] chainTimer = new int[3];
+        private readonly int[] dashTimer = new int[3];        // > 0 while dashing (can slip through the opponent)
+        private readonly Keys[] lastTapKey = new Keys[3];
+        private readonly long[] lastTapTime = new long[3];
+        private readonly HashSet<Keys> pressedKeys = new HashSet<Keys>();   // tells a fresh key press from auto-repeat
+
+        // --- CHRONO-SHADOW ---
+        private readonly List<ChronoShadow> shadows = new List<ChronoShadow>();
+
+        // --- CPU ---
         private int cpuDecisionTimer = 0;
+        private float cpuMoveDir = 0f;
+        private int cpuBlockTimer = 0;
+        private int cpuDuckTimer = 0;
 
         // --- VISUAL FX ---
         private List<ShockwaveRing> shockwaves = new List<ShockwaveRing>();
@@ -75,12 +93,13 @@ namespace Gui
         private int speedLineTimer = 0;
         private PointF speedLineCenter = PointF.Empty;
         private int hitStopFreeze = 0;
+        private bool paused = false;
+        private Rectangle PauseButtonRect => new Rectangle((GameWidth / 2) - 34, 2, 68, 20);
         private int rageCinematicFlash = 0;
         private float cameraZoom = 1.0f;
         private float targetZoom = 1.0f;
         private int screenShake = 0;
-        private int introCounter = 60;
-        private string matchResultText = "";
+        private int introCounter = 90;
         private float bounceCycle = 0;
         private float stageAnimationCycle = 0;
         private Random rng = new Random();
@@ -117,7 +136,7 @@ namespace Gui
             clockTimer.Interval = 1000;
             clockTimer.Tick += (s, e) =>
             {
-                if (currentState == GameState.Battle && roundTimer > 0 && hitStopFreeze == 0)
+                if (currentState == GameState.Battle && !paused && roundTimer > 0 && hitStopFreeze == 0)
                 {
                     roundTimer--;
                 }
@@ -126,10 +145,23 @@ namespace Gui
 
             this.KeyPreview = true;
             this.KeyDown += Form1_KeyDown;
+            this.KeyUp += Form1_KeyUp;
+            this.MouseClick += Form1_MouseClick;
+            this.Deactivate += (s, e) =>
+            {
+                pressedKeys.Clear();
+                if (currentState == GameState.Battle) paused = true;   // alt-tabbing pauses the fight
+            };
         }
 
         private void EngineLoop_Tick(object? sender, EventArgs e)
         {
+            if (paused)
+            {
+                this.Invalidate();
+                return;
+            }
+
             if (hitStopFreeze > 0)
             {
                 hitStopFreeze--;
@@ -138,7 +170,6 @@ namespace Gui
             }
 
             bounceCycle += 0.08f;
-            if (armoryFlash > 0) armoryFlash--;
             arenaSlide += (selectedArenaIndex - arenaSlide) * 0.2f;
             if (arenaTransition < 1f) arenaTransition = Math.Min(1f, arenaTransition + 0.09f);
             stageAnimationCycle += 0.04f; // Drives the movement of lava, smoke, and billboards
@@ -154,6 +185,10 @@ namespace Gui
             {
                 if (isVsCPU) UpdateCPUAI();
                 UpdateBattlePhysics();
+            }
+            else if (currentState == GameState.KO)
+            {
+                UpdateRoundEnd();
             }
 
             UpdateVisualEffects();

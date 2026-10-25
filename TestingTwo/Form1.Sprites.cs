@@ -42,51 +42,51 @@ namespace Gui
         // Called once per game tick (see EngineLoop_Tick in Form1.cs)
         private void UpdateFighterSprites()
         {
+            p1Sprite.FighterIndex = p1CharIndex;
+            p2Sprite.FighterIndex = p2CharIndex;
             p1Sprite.SyncFromGame(p1X, p1VelX, p1VelY, p1Y >= GroundLevel, p1Action, p1ActionTimer, false);
             p2Sprite.SyncFromGame(p2X, p2VelX, p2VelY, p2Y >= GroundLevel, p2Action, p2ActionTimer, true);
         }
 
         // Replaces the shape-drawn fighter whenever the sprite picture is available.
-        // sprite = null draws the standing pose (character select, armory preview).
-        private void DrawSpriteFighter(Graphics g, float x, float y, int action, bool faceRight, FighterInfo fighter, Loadout? loadout, Player? sprite)
+        // sprite = null draws the standing pose (character select).
+        private void DrawSpriteFighter(Graphics g, float x, float y, int action, bool faceRight, FighterInfo fighter, Player? sprite)
         {
-            float bob = 0f; // Disabled idle up-and-down floating motion
-            float cy = y + bob;
+            float cy = y;
             float footY = cy + SpriteFootOffset;
             float centerX = x + 54f;
 
-            // Simple ground shadow (ring indicator removed)
+            // Simple ground shadow
             float shadowScale = Math.Max(0.4f, 1f - ((GroundLevel - y) / 250f));
             using (SolidBrush shadow = new SolidBrush(Color.FromArgb(140, 0, 0, 0)))
             {
                 g.FillEllipse(shadow, x + 15, GroundLevel + 160, 90 * shadowScale, 20 * shadowScale);
             }
 
-            // Finisher glow behind the fighter
-            if (action == 3)
+            // Elder's Hyper Armor: a golden glow while an attack cannot be interrupted
+            if (sprite != null && sprite.HasHyperArmor(action))
             {
                 using (GraphicsPath auraPath = new GraphicsPath())
                 {
                     auraPath.AddEllipse(x - 25, cy - 25, 170, 230);
                     using (PathGradientBrush glow = new PathGradientBrush(auraPath))
                     {
-                        glow.CenterColor = Color.FromArgb(210, fighter.AuraColor);
+                        glow.CenterColor = Color.FromArgb(150, Color.Gold);
                         glow.SurroundColors = new Color[] { Color.Transparent };
                         g.FillPath(glow, auraPath);
                     }
                 }
             }
 
-            if (loadout != null) DrawSkinBackdrop(g, x, cy, faceRight, loadout.SkinIndex);
-
             string animation = sprite?.CurrentAnimation ?? "Idle";
             int frame = sprite?.Frame ?? 0;
             bool hurt = sprite?.Hurt ?? false;
             FighterSprites.Draw(g, Array.IndexOf(GameData.Roster, fighter), animation, frame, centerX, footY, SpriteScale, faceRight, hurt, sprite?.CurrentAge ?? AgeStage.Youth);
 
+            bool isCpu = isVsCPU && sprite != null && ReferenceEquals(sprite, p2Sprite);
             using (Font nameFont = new Font("Impact", 11, FontStyle.Italic))
             {
-                string tag = (!faceRight && isVsCPU) ? "CPU: " + fighter.Name : fighter.Name;
+                string tag = isCpu ? "CPU: " + fighter.Name : fighter.Name;
                 g.DrawString(tag, nameFont, Brushes.White, x + 5, footY - (FighterSprites.CellH * SpriteScale) - 22f);
             }
         }

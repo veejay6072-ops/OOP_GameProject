@@ -57,7 +57,8 @@ namespace Gui
                 g.DrawString(header, titleF, Brushes.Gold, w / 2 - 200, 25);
             }
 
-            int cardW = 210, cardH = 340, startX = 60, startY = 100, spacing = 240;
+            int cardW = 210, cardH = 340, startY = 100, spacing = 240;
+            int startX = (w - (((GameData.Roster.Length - 1) * spacing) + cardW)) / 2;
             for (int i = 0; i < GameData.Roster.Length; i++)
             {
                 int cx = startX + (i * spacing);

@@ -3,18 +3,19 @@
 namespace Gui
 {
     /// <summary>
-    /// All fixed game content: fighters, arenas, skills, armor, and skins.
+    /// All fixed game content: fighters and arenas.
     /// </summary>
     internal static class GameData
     {
         // --- CHARACTER ROSTER ---
+        // The order here is the order of the characters in Plater.tscn (Vyte, Aloy, Mokutin, Aerin).
+        // Fighter number N uses the Nth character of the scene, so keep both lists in the same order.
         public static readonly FighterInfo[] Roster = new FighterInfo[]
         {
-            new FighterInfo { Name = "Insu KAZAMA", Style = "Traditional Karate", PrimaryColor = Color.FromArgb(0, 150, 255), AuraColor = Color.Cyan, SpecialSkill = "Kazama Electric Fist" },
-            new FighterInfo { Name = "Andre MISHIMA", Style = "Mishima Style Karate", PrimaryColor = Color.FromArgb(220, 20, 60), AuraColor = Color.MediumPurple, SpecialSkill = "Devil Laser Beam" },
-            new FighterInfo { Name = "Justin Phoenix", Style = "Judo & Brawling", PrimaryColor = Color.FromArgb(255, 185, 0), AuraColor = Color.OrangeRed, SpecialSkill = "Phoenix Smasher" },
-            new FighterInfo { Name = "Jayvee Hworang", Style = "Tae Kwon Do", PrimaryColor = Color.FromArgb(0, 230, 120), AuraColor = Color.Lime, SpecialSkill = "Hunting Hawk Kick" },
-            new FighterInfo { Name = "Grey Pants Brawler", Style = "Street Brawling", PrimaryColor = Color.Gray, AuraColor = Color.WhiteSmoke, SpecialSkill = "Jump Attack" }
+            new FighterInfo { Name = "Vyte",    Style = "Balanced Fighter", PrimaryColor = Color.FromArgb(0, 150, 255),  AuraColor = Color.Cyan,         SpecialSkill = "Chrono-Shadow" },
+            new FighterInfo { Name = "Aloy",    Style = "Balanced Fighter", PrimaryColor = Color.FromArgb(220, 20, 60),  AuraColor = Color.MediumPurple, SpecialSkill = "Chrono-Shadow" },
+            new FighterInfo { Name = "Mokutin", Style = "Balanced Fighter", PrimaryColor = Color.FromArgb(255, 185, 0), AuraColor = Color.OrangeRed,    SpecialSkill = "Chrono-Shadow" },
+            new FighterInfo { Name = "Aerin",   Style = "Balanced Fighter", PrimaryColor = Color.FromArgb(0, 230, 120),  AuraColor = Color.Lime,         SpecialSkill = "Chrono-Shadow" }
         };
 
         // --- ARENAS ---
@@ -40,49 +41,6 @@ namespace Gui
                 ParticleColor = Color.FromArgb(255, 240, 190),
                 BackgroundFile = "elevator_16bit.png"
             }
-        };
-
-        // --- SKILLS ---
-        public static readonly SkillInfo[] SkillCatalog = new SkillInfo[]
-        {
-            new SkillInfo { Name = "Quick Jab", Type = SkillType.Starter, Damage = 7, Reach = 140, Action = 1, Price = 0,
-                Description = "A fast straight punch. A reliable combo opener." },
-            new SkillInfo { Name = "Dash Strike", Type = SkillType.Starter, Damage = 9, Reach = 200, Lunge = 16, Action = 1, Price = 100,
-                Description = "Lunges forward to close the gap, then hits." },
-            new SkillInfo { Name = "Rising Launcher", Type = SkillType.Extender, Damage = 12, Launch = -18, Reach = 140, Action = 2, Price = 0,
-                Description = "Pops the opponent into the air to extend a combo." },
-            new SkillInfo { Name = "Air Juggle Kick", Type = SkillType.Extender, Damage = 10, Launch = -24, Reach = 150, Action = 2, Price = 120,
-                Description = "A higher launch built for long juggles." },
-            new SkillInfo { Name = "Rage Art", Type = SkillType.Finisher, Damage = 26, Launch = -10, Reach = 220, HeatCost = 50, Knockback = 26, ActionFrames = 20, Action = 3, Price = 0,
-                Description = "A heat-powered finisher with heavy knockback." },
-            new SkillInfo { Name = "Meteor Smash", Type = SkillType.Finisher, Damage = 34, Launch = -6, Reach = 200, HeatCost = 70, Knockback = 30, ActionFrames = 22, Action = 3, Price = 220,
-                Description = "A devastating finisher. Needs a full heat gauge." },
-            new SkillInfo { Name = "Shock Trap", Type = SkillType.Utility, Damage = 5, Reach = 260, HeatCost = 20, Knockback = 4, StunFrames = 36, ActionFrames = 16, Action = 3, Price = 130,
-                Description = "A long-range shockwave that stuns the target for a long time." },
-            new SkillInfo { Name = "Guard Break", Type = SkillType.Utility, Damage = 6, Reach = 140, Knockback = 8, StunFrames = 26, HeatDrain = 25, Action = 1, Price = 110,
-                Description = "Stuns the target and drains 25 of their heat." }
-        };
-
-        // --- ARMOR ---
-        public static readonly ArmorInfo[] ArmorCatalog = new ArmorInfo[]
-        {
-            new ArmorInfo { Name = "No Armor", DamageReduction = 0, Price = 0, Description = "No protection. Maximum mobility." },
-            new ArmorInfo { Name = "Leather Wraps", DamageReduction = 1, Price = 80, Description = "Light padding that shaves a little off every hit." },
-            new ArmorInfo { Name = "Steel Plating", DamageReduction = 2, Price = 160, Description = "Solid plating that blunts incoming attacks." },
-            new ArmorInfo { Name = "Titan Plate", DamageReduction = 4, Price = 280, Description = "Heavy armor. Weak attacks barely scratch you." }
-        };
-
-        // --- BATTLE SKINS ---
-        public static readonly SkinInfo[] SkinCatalog = new SkinInfo[]
-        {
-            new SkinInfo { Name = "Standard", Price = 0,
-                Description = "No bonuses and no penalties." },
-            new SkinInfo { Name = "Vanguard Skin", ArmorEffectiveness = 1.25f, DashSpeed = 0.85f, Price = 150,
-                Description = "+25% armor damage reduction, -15% dash speed." },
-            new SkinInfo { Name = "Berserker Skin", HeatGain = 1.30f, HealthModifier = -GameConfig.HeartHealth, Price = 150,
-                Description = "+30% faster ult gauge gain, -1 heart of base health." },
-            new SkinInfo { Name = "Duelist Skin", BonusComboCharge = 1, DamageTaken = 1.15f, Price = 150,
-                Description = "+1 combo charge per completed combo, +15% damage taken." }
         };
     }
 }

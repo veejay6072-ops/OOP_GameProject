@@ -33,6 +33,7 @@ namespace Gui
         public string Animation = "Idle";
         public int Frame;
         public bool FaceRight = true;
+        public int Fighter;
         public AgeStage Age = AgeStage.Youth;
     }
 

@@ -36,21 +36,21 @@ namespace Gui
         private static readonly PointF StartPos = new PointF(650f, 1000f);
         private static readonly PointF[] ButtonPos =
         {
-            new PointF(830f, 988f), new PointF(906f, 988f), new PointF(982f, 988f),   // top row    = Player 1 skills
-            new PointF(830f, 1046f), new PointF(906f, 1046f), new PointF(982f, 1046f) // bottom row = Player 2 skills
+            new PointF(830f, 988f), new PointF(906f, 988f), new PointF(982f, 988f),   // top row    = Player 1: attack, shadow, block
+            new PointF(830f, 1046f), new PointF(906f, 1046f), new PointF(982f, 1046f) // bottom row = Player 2: attack, shadow, block
         };
         private static readonly Color[] ButtonColors =
         {
             Color.FromArgb(255, 205, 40), Color.FromArgb(255, 140, 30), Color.FromArgb(230, 50, 55),
             Color.FromArgb(60, 200, 95), Color.FromArgb(60, 125, 235), Color.FromArgb(255, 205, 40)
         };
-        private static readonly Keys[] ButtonKeys = { Keys.F, Keys.G, Keys.T, Keys.K, Keys.O, Keys.P };
-        private static readonly string[] ButtonLabels = { "F", "G", "T", "K", "O", "P" };
+        private static readonly Keys[] ButtonKeys = { Keys.F, Keys.G, Keys.T, Keys.U, Keys.O, Keys.P };
+        private static readonly string[] ButtonLabels = { "F", "G", "T", "U", "O", "P" };
 
         private static readonly Keys[] JoyLeft = { Keys.Left, Keys.A, Keys.J };
         private static readonly Keys[] JoyRight = { Keys.Right, Keys.D, Keys.L };
         private static readonly Keys[] JoyUp = { Keys.Up, Keys.W, Keys.I };
-        private static readonly Keys[] JoyDown = { Keys.Down };
+        private static readonly Keys[] JoyDown = { Keys.Down, Keys.S, Keys.K };
         private static readonly Keys[] MenuKeys = { Keys.Back };
         private static readonly Keys[] StartKeys = { Keys.Enter, Keys.Space };
 
@@ -79,7 +79,7 @@ namespace Gui
 
         private bool OnMenuScreen =>
             currentState == GameState.ModeSelect || currentState == GameState.CharSelect ||
-            currentState == GameState.ArenaSelect || currentState == GameState.Armory;
+            currentState == GameState.ArenaSelect;
 
         // ---------------------------------------------------------------
         //  SETUP (called from the Form1 constructor)
@@ -504,7 +504,7 @@ namespace Gui
             joyY += (targetY - joyY) * 0.4f;
             DrawJoystick(g);
 
-            // Six action buttons light up with F G T (player 1) and K O P (player 2)
+            // Six action buttons light up with F G T (player 1) and U O P (player 2)
             for (int i = 0; i < ButtonPos.Length; i++)
             {
                 DrawLiveButton(g, ButtonPos[i].X, ButtonPos[i].Y, 25f, ButtonColors[i], IsLit(new[] { ButtonKeys[i] }), ButtonLabels[i], false);

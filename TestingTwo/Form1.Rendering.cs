@@ -27,10 +27,6 @@ namespace Gui
             {
                 DrawArenaSelection(g);
             }
-            else if (currentState == GameState.Armory)
-            {
-                DrawArmory(g);
-            }
             else
             {
                 int w = this.ClientSize.Width, h = this.ClientSize.Height;
@@ -83,7 +79,7 @@ namespace Gui
                     if (FighterSprites.Available)
                     {
                         // After-image of the real sprite pose, in the fighter's aura color
-                        FighterSprites.DrawGhost(g, t.Animation, t.Frame, t.X + 54f, t.Y + SpriteFootOffset, SpriteScale, t.FaceRight, t.Color, t.Alpha, t.Age);
+                        FighterSprites.DrawGhost(g, t.Fighter, t.Animation, t.Frame, t.X + 54f, t.Y + SpriteFootOffset, SpriteScale, t.FaceRight, t.Color, t.Alpha, t.Age);
                     }
                     else
                     {
@@ -95,11 +91,13 @@ namespace Gui
                     }
                 }
 
-                DrawFighterReflection(g, p1X, p1Y, p1Action, true, GameData.Roster[p1CharIndex]);
-                DrawFighterReflection(g, p2X, p2Y, p2Action, false, GameData.Roster[p2CharIndex]);
+                DrawFighterReflection(g, p1X, p1Y, p1Action, facingRight[1], GameData.Roster[p1CharIndex]);
+                DrawFighterReflection(g, p2X, p2Y, p2Action, facingRight[2], GameData.Roster[p2CharIndex]);
 
-                DrawArticulatedFighter(g, p1X, p1Y, p1Action, true, GameData.Roster[p1CharIndex], p1Loadout, p1Sprite);
-                DrawArticulatedFighter(g, p2X, p2Y, p2Action, false, GameData.Roster[p2CharIndex], p2Loadout, p2Sprite);
+                DrawShadows(g);
+
+                DrawArticulatedFighter(g, p1X, p1Y, p1Action, facingRight[1], GameData.Roster[p1CharIndex], p1Sprite);
+                DrawArticulatedFighter(g, p2X, p2Y, p2Action, facingRight[2], GameData.Roster[p2CharIndex], p2Sprite);
 
                 foreach (var s in shockwaves)
                 {
@@ -145,24 +143,95 @@ namespace Gui
                 g.ResetTransform();
                 DrawModernHUD(g);
 
-                if (currentState == GameState.FightIntro)
+                DrawRoundOverlay(g, w);
+                DrawPauseUi(g, w, h);
+            }
+        }
+
+        // Chrono-Shadow phantoms: frozen in the pose they were dropped in, then they replay the strike
+        private void DrawShadows(Graphics g)
+        {
+            double seconds = Environment.TickCount64 / 1000.0;
+
+            foreach (ChronoShadow s in shadows)
+            {
+                float centerX = s.X + 54f;
+                float footY = s.Y + SpriteFootOffset;
+
+                int frame = s.Frame;
+                int alpha = (int)(150 + (50 * Math.Sin(seconds * 6.0)));
+                if (s.Executed)
                 {
-                    DrawAnnouncement(g, introCounter > 25 ? "ROUND 1" : "FIGHT!", Color.Yellow);
+                    int frames = FighterSprites.PhantomFrameCount(s.FighterIndex, s.Age, s.Animation);
+                    frame = Math.Min(s.ExecTicks / 4, Math.Max(0, frames - 1));
+                    alpha = 235;
                 }
-                else if (currentState == GameState.KO)
+
+                using (GraphicsPath glowPath = new GraphicsPath())
                 {
-                    DrawAnnouncement(g, "K.O.", Color.Red);
-                    using Font wf = new Font("Impact", 24, FontStyle.Italic);
-                    SizeF sz = g.MeasureString(matchResultText, wf);
-                    g.DrawString(matchResultText, wf, Brushes.Gold, (w / 2f) - (sz.Width / 2f), 280);
+                    glowPath.AddEllipse(s.X - 15, s.Y - 20, 150, 220);
+                    using (PathGradientBrush glow = new PathGradientBrush(glowPath))
+                    {
+                        glow.CenterColor = Color.FromArgb(s.Executed ? 150 : 80, 80, 180, 255);
+                        glow.SurroundColors = new Color[] { Color.Transparent };
+                        g.FillPath(glow, glowPath);
+                    }
+                }
 
-                    using Font infoFont = new Font("Segoe UI", 12, FontStyle.Bold);
-                    SizeF rewardSize = g.MeasureString(rewardText, infoFont);
-                    g.DrawString(rewardText, infoFont, Brushes.Gold, (w / 2f) - (rewardSize.Width / 2f), 330);
+                FighterSprites.DrawPhantom(g, s.FighterIndex, s.Animation, frame, centerX, footY, SpriteScale, s.FaceRight, s.Age, alpha);
 
-                    string restartText = "[ R ] Return to Mode Menu";
-                    SizeF restartSize = g.MeasureString(restartText, infoFont);
-                    g.DrawString(restartText, infoFont, Brushes.White, (w / 2f) - (restartSize.Width / 2f), 365);
+                if (!s.Executed)
+                {
+                    string count = Math.Ceiling(Math.Max(0f, s.Timer)).ToString();
+                    using (Font cf = new Font("Impact", 22, FontStyle.Italic))
+                    using (SolidBrush cb = new SolidBrush(Color.FromArgb(230, 120, 200, 255)))
+                    {
+                        SizeF sz = g.MeasureString(count, cf);
+                        g.DrawString(count, cf, cb, centerX - (sz.Width / 2f), footY - FighterSprites.DrawnHeight(s.FighterIndex, s.Age) - 50f);
+                    }
+                }
+            }
+        }
+
+        // "ROUND n / FIGHT!" at the start of a round and the K.O. screen between rounds
+        private void DrawRoundOverlay(Graphics g, int w)
+        {
+            if (currentState == GameState.FightIntro)
+            {
+                bool announcing = introCounter > 40;
+                string title = announcing ? (roundNumber >= 3 ? "FINAL ROUND" : $"ROUND {roundNumber}") : "FIGHT!";
+                DrawAnnouncement(g, title, Color.Yellow);
+
+                if (announcing)
+                {
+                    using (Font af = new Font("Impact", 20, FontStyle.Italic))
+                    {
+                        string ages = $"P1: {CombatRules.AgeName(p1Sprite.CurrentAge)}        P2: {CombatRules.AgeName(p2Sprite.CurrentAge)}";
+                        DrawTextCentered(g, ages, af, Brushes.Cyan, w, 272);
+                    }
+                }
+            }
+            else if (currentState == GameState.KO)
+            {
+                DrawAnnouncement(g, koHeadline, Color.Red);
+
+                using (Font wf = new Font("Impact", 24, FontStyle.Italic))
+                using (Font infoFont = new Font("Segoe UI", 12, FontStyle.Bold))
+                {
+                    DrawTextCentered(g, roundResultText, wf, Brushes.Gold, w, 270);
+
+                    if (matchOver)
+                    {
+                        using (Font mf = new Font("Impact", 30, FontStyle.Italic))
+                        {
+                            DrawTextCentered(g, matchResultText, mf, Brushes.Cyan, w, 320);
+                        }
+                        DrawTextCentered(g, "[ R ] Return to Mode Menu", infoFont, Brushes.White, w, 375);
+                    }
+                    else
+                    {
+                        DrawTextCentered(g, nextRoundText, infoFont, Brushes.OrangeRed, w, 325);
+                    }
                 }
             }
         }
@@ -196,11 +265,11 @@ namespace Gui
             if (ar.BackgroundFile != null && TryDrawImageScenery(g, ar, arenaIndex >= 0)) return;
         }
 
-        private void DrawArticulatedFighter(Graphics g, float x, float y, int action, bool faceRight, FighterInfo fighter, Loadout? loadout = null, Player? sprite = null)
+        private void DrawArticulatedFighter(Graphics g, float x, float y, int action, bool faceRight, FighterInfo fighter, Player? sprite = null)
         {
             if (FighterSprites.Available)
             {
-                DrawSpriteFighter(g, x, y, action, faceRight, fighter, loadout, sprite);
+                DrawSpriteFighter(g, x, y, action, faceRight, fighter, sprite);
                 return;
             }
 
@@ -229,7 +298,6 @@ namespace Gui
                 }
             }
 
-            if (loadout != null) DrawSkinBackdrop(g, x, cy, faceRight, loadout.SkinIndex);
 
             g.FillEllipse(new SolidBrush(skin), x + 35, cy, 38, 44);
             Point[] hair = faceRight
@@ -267,8 +335,6 @@ namespace Gui
                 g.FillRectangle(new SolidBrush(fighter.PrimaryColor), x + 58, cy + 172, 24, 12);
             }
 
-            if (loadout != null) DrawFighterGear(g, x, cy, action, faceRight, loadout, fighter);
-
             if (action == 1)
             {
                 if (faceRight)
@@ -305,146 +371,9 @@ namespace Gui
 
             using (Font nf = new Font("Impact", 11, FontStyle.Italic))
             {
-                string tag = (!faceRight && isVsCPU) ? "CPU: " + fighter.Name : fighter.Name;
+                bool isCpu = isVsCPU && sprite != null && ReferenceEquals(sprite, p2Sprite);
+                string tag = isCpu ? "CPU: " + fighter.Name : fighter.Name;
                 g.DrawString(tag, nf, Brushes.White, x + 5, cy - 25);
-            }
-        }
-
-        private void DrawSkinBackdrop(Graphics g, float x, float cy, bool faceRight, int skinIndex)
-        {
-            if (skinIndex == 2)
-            {
-                float pulse = (float)Math.Sin(bounceCycle * 2f) * 4f;
-                using (SolidBrush outer = new SolidBrush(Color.FromArgb(45, 255, 40, 20)))
-                using (SolidBrush inner = new SolidBrush(Color.FromArgb(55, 255, 90, 30)))
-                {
-                    g.FillEllipse(outer, x - 10 - pulse, cy - 18 - pulse, 130 + (pulse * 2), 212 + (pulse * 2));
-                    g.FillEllipse(inner, x + 8, cy - 4, 94, 180);
-                }
-            }
-            else if (skinIndex == 3)
-            {
-                float wave = (float)Math.Sin(bounceCycle * 2f) * 6f;
-                PointF[] cape = faceRight
-                    ? new PointF[] { new PointF(x + 32, cy + 46), new PointF(x + 32, cy + 104), new PointF(x - 24, cy + 132 + wave), new PointF(x - 10, cy + 74) }
-                    : new PointF[] { new PointF(x + 76, cy + 46), new PointF(x + 76, cy + 104), new PointF(x + 132, cy + 132 + wave), new PointF(x + 118, cy + 74) };
-
-                using (SolidBrush capeBrush = new SolidBrush(Color.FromArgb(210, 110, 30, 150)))
-                using (Pen capeEdge = new Pen(Color.Gold, 2))
-                {
-                    g.FillPolygon(capeBrush, cape);
-                    g.DrawPolygon(capeEdge, cape);
-                }
-            }
-        }
-
-        private void DrawFighterGear(Graphics g, float x, float cy, int action, bool faceRight, Loadout loadout, FighterInfo fighter)
-        {
-            float[] legXs = action == 2 ? new[] { x + 40f } : new[] { x + 26f, x + 58f };
-            float legW = action == 2 ? 22f : 24f;
-
-            switch (loadout.ArmorIndex)
-            {
-                case 1:
-                    using (SolidBrush leather = new SolidBrush(Color.FromArgb(139, 90, 43)))
-                    {
-                        g.FillRectangle(leather, x + 30, cy + 58, 48, 7);
-                        g.FillRectangle(leather, x + 30, cy + 76, 48, 7);
-                        foreach (float lx in legXs)
-                        {
-                            g.FillRectangle(leather, lx, cy + 138, legW, 8);
-                            g.FillRectangle(leather, lx, cy + 154, legW, 8);
-                        }
-                    }
-                    break;
-
-                case 2:
-                    using (SolidBrush steel = new SolidBrush(Color.FromArgb(150, 160, 175)))
-                    using (SolidBrush steelLight = new SolidBrush(Color.FromArgb(205, 215, 228)))
-                    using (Pen steelEdge = new Pen(Color.FromArgb(70, 75, 90), 2))
-                    {
-                        g.FillRectangle(steel, x + 32, cy + 46, 44, 38);
-                        g.DrawRectangle(steelEdge, x + 32, cy + 46, 44, 38);
-                        g.FillRectangle(steelLight, x + 36, cy + 50, 12, 28);
-                        g.FillEllipse(steel, x + 16, cy + 40, 24, 18);
-                        g.FillEllipse(steel, x + 68, cy + 40, 24, 18);
-                        g.DrawEllipse(steelEdge, x + 16, cy + 40, 24, 18);
-                        g.DrawEllipse(steelEdge, x + 68, cy + 40, 24, 18);
-                        foreach (float lx in legXs)
-                        {
-                            g.FillRectangle(steel, lx, cy + 138, legW, 28);
-                            g.DrawRectangle(steelEdge, lx, cy + 138, legW, 28);
-                        }
-                    }
-                    break;
-
-                case 3:
-                    using (SolidBrush plate = new SolidBrush(Color.FromArgb(55, 55, 72)))
-                    using (SolidBrush gold = new SolidBrush(Color.Gold))
-                    using (SolidBrush core = new SolidBrush(fighter.AuraColor))
-                    using (Pen trim = new Pen(Color.Gold, 2))
-                    {
-                        g.FillRectangle(plate, x + 29, cy + 44, 50, 48);
-                        g.DrawRectangle(trim, x + 29, cy + 44, 50, 48);
-                        g.FillEllipse(core, x + 46, cy + 60, 16, 16);
-                        g.FillEllipse(gold, x + 10, cy + 34, 32, 24);
-                        g.FillEllipse(gold, x + 66, cy + 34, 32, 24);
-                        foreach (float lx in legXs)
-                        {
-                            g.FillRectangle(plate, lx, cy + 134, legW, 34);
-                            g.DrawRectangle(trim, lx, cy + 134, legW, 34);
-                            g.FillEllipse(gold, lx + 4, cy + 126, legW - 8, 14);
-                        }
-                        g.FillPie(plate, x + 32, cy - 6, 44, 44, 180, 180);
-                        g.DrawArc(trim, x + 32, cy - 6, 44, 44, 180, 180);
-                        g.FillRectangle(gold, x + 52, cy - 14, 4, 12);
-                    }
-                    break;
-            }
-
-            switch (loadout.SkinIndex)
-            {
-                case 1:
-                    PointF[] emblem =
-                    {
-                        new PointF(x + 44, cy + 50), new PointF(x + 64, cy + 50), new PointF(x + 64, cy + 68),
-                        new PointF(x + 54, cy + 80), new PointF(x + 44, cy + 68)
-                    };
-                    using (SolidBrush blue = new SolidBrush(Color.FromArgb(50, 110, 230)))
-                    using (Pen outline = new Pen(Color.White, 2))
-                    {
-                        g.FillPolygon(blue, emblem);
-                        g.DrawPolygon(outline, emblem);
-                        g.FillEllipse(blue, x + 16, cy + 42, 22, 14);
-                        g.FillEllipse(blue, x + 70, cy + 42, 22, 14);
-                    }
-                    break;
-
-                case 2:
-                    float wave = (float)Math.Sin(bounceCycle * 3f) * 4f;
-                    PointF[] tails = faceRight
-                        ? new PointF[] { new PointF(x + 35, cy + 9), new PointF(x + 10, cy + 2 + wave), new PointF(x + 14, cy + 18 - wave), new PointF(x + 35, cy + 15) }
-                        : new PointF[] { new PointF(x + 73, cy + 9), new PointF(x + 98, cy + 2 + wave), new PointF(x + 94, cy + 18 - wave), new PointF(x + 73, cy + 15) };
-                    using (SolidBrush band = new SolidBrush(Color.Crimson))
-                    using (Pen paint = new Pen(Color.Crimson, 3))
-                    {
-                        g.FillRectangle(band, x + 35, cy + 9, 38, 6);
-                        g.FillPolygon(band, tails);
-                        if (loadout.ArmorIndex < 2)
-                        {
-                            g.DrawLine(paint, x + 40, cy + 52, x + 48, cy + 72);
-                            g.DrawLine(paint, x + 52, cy + 52, x + 60, cy + 72);
-                            g.DrawLine(paint, x + 64, cy + 52, x + 72, cy + 72);
-                        }
-                    }
-                    break;
-
-                case 3:
-                    using (Pen sash = new Pen(Color.Gold, 6))
-                    {
-                        g.DrawLine(sash, x + 32, cy + 46, x + 78, cy + 98);
-                    }
-                    break;
             }
         }
 

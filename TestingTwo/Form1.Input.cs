@@ -8,8 +8,51 @@ namespace Gui
 {
     public partial class Form1 : Form
     {
+        private void TogglePause()
+        {
+            paused = !paused;
+            Sfx.Play(paused ? 420 : 700, 70);
+        }
+
+        // Clicking the small PAUSE button at the top of the screen
+        private void Form1_MouseClick(object? sender, MouseEventArgs e)
+        {
+            bool inFight = currentState == GameState.FightIntro || currentState == GameState.Battle || currentState == GameState.KO;
+            if (!inFight || screenDevice.Width <= 0) return;
+
+            int gx = (int)((e.X - screenDevice.X) * GameWidth / (float)screenDevice.Width);
+            int gy = (int)((e.Y - screenDevice.Y) * GameHeight / (float)screenDevice.Height);
+            if (PauseButtonRect.Contains(gx, gy)) TogglePause();
+        }
+
+        private void Form1_KeyUp(object? sender, KeyEventArgs e)
+        {
+            pressedKeys.Remove(e.KeyCode);
+        }
+
         private void Form1_KeyDown(object? sender, KeyEventArgs e)
         {
+            // false while the key is just auto-repeating because it is held down
+            bool fresh = pressedKeys.Add(e.KeyCode);
+
+            // PAUSE: Esc or the MENU button (Backspace) during a fight. While paused, Enter also resumes and R quits to the menu.
+            bool inFight = currentState == GameState.FightIntro || currentState == GameState.Battle || currentState == GameState.KO;
+            if (inFight && fresh && (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Back || (paused && e.KeyCode == Keys.Enter)))
+            {
+                TogglePause();
+                return;
+            }
+            if (paused)
+            {
+                if (e.KeyCode == Keys.R)
+                {
+                    paused = false;
+                    currentState = GameState.ModeSelect;
+                    p1Locked = false;
+                }
+                return;
+            }
+
             if (currentState == GameState.ModeSelect)
             {
                 if (e.KeyCode == Keys.Left || e.KeyCode == Keys.Up) selectedMode = 0;
@@ -54,7 +97,6 @@ namespace Gui
                 if (e.KeyCode == Keys.Left) ChangeArena(-1);
                 if (e.KeyCode == Keys.Right) ChangeArena(1);
 
-                // BYPASS SHOP/ARMORY MECHANIC
                 if (e.KeyCode == Keys.Enter) StartMatch();
 
                 if (e.KeyCode == Keys.Back)
@@ -65,28 +107,42 @@ namespace Gui
             }
             else if (currentState == GameState.Battle)
             {
-                if (e.KeyCode == Keys.A && p1X > 80) p1VelX = -13 * SpeedFactor(1);
-                if (e.KeyCode == Keys.D && p1X < p2X - 70) p1VelX = 13 * SpeedFactor(1);
-                if (e.KeyCode == Keys.W && p1Y >= GroundLevel) { p1VelY = -22; Sfx.Play(440, 60); }
-                if (e.KeyCode == Keys.F) ExecuteAttack(1, 0);
-                if (e.KeyCode == Keys.G) ExecuteAttack(1, 1);
-                if (e.KeyCode == Keys.T) ExecuteAttack(1, 2);
-
-                if (!isVsCPU)
-                {
-                    if (e.KeyCode == Keys.J && p2X > p1X + 70) p2VelX = -13 * SpeedFactor(2);
-                    if (e.KeyCode == Keys.L && p2X < this.ClientSize.Width - 160) p2VelX = 13 * SpeedFactor(2);
-                    if (e.KeyCode == Keys.I && p2Y >= GroundLevel) { p2VelY = -22; Sfx.Play(440, 60); }
-                    if (e.KeyCode == Keys.K) ExecuteAttack(2, 0);
-                    if (e.KeyCode == Keys.O) ExecuteAttack(2, 1);
-                    if (e.KeyCode == Keys.P) ExecuteAttack(2, 2);
-                }
+                HandleBattleKey(e.KeyCode, fresh);
             }
-            else if (currentState == GameState.KO && e.KeyCode == Keys.R)
+            else if (currentState == GameState.KO && matchOver && e.KeyCode == Keys.R)
             {
                 currentState = GameState.ModeSelect;
                 p1Locked = false;
             }
+        }
+
+        /// <summary>
+        /// One-shot battle keys. Walking, ducking and blocking are held keys and are read every tick instead
+        /// (see ApplyHeldInputs in Form1.Battle.cs).
+        ///
+        ///   Player 1:  A / D move (double-tap to dash)   W jump   S duck   F attack   G shadow   T block
+        ///   Player 2:  J / L move (double-tap to dash)   I jump   K duck   U attack   O shadow   P block
+        ///
+        /// Attack on the ground chains the combo string, attack while ducking is the down attack,
+        /// attack in the air is the jump attack. Shadow only works in the middle of an attack.
+        /// </summary>
+        private void HandleBattleKey(Keys key, bool fresh)
+        {
+            if (!fresh) return;
+
+            if (key == Keys.A) RegisterDirectionTap(1, key, -1f);
+            else if (key == Keys.D) RegisterDirectionTap(1, key, 1f);
+            else if (key == Keys.W) TryJump(1);
+            else if (key == Keys.F) TryAttack(1);
+            else if (key == Keys.G) TryDropShadow(1);
+
+            if (isVsCPU) return;
+
+            if (key == Keys.J) RegisterDirectionTap(2, key, -1f);
+            else if (key == Keys.L) RegisterDirectionTap(2, key, 1f);
+            else if (key == Keys.I) TryJump(2);
+            else if (key == Keys.U) TryAttack(2);
+            else if (key == Keys.O) TryDropShadow(2);
         }
     }
 }

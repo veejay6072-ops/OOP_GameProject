@@ -21,13 +21,17 @@ namespace Gui
         // Scene file names to look for.
         private static readonly string[] SceneNames = { "Plater.tscn", "Plater_1.tscn", "Player.tscn" };
 
-        // The AnimatedSprite2D node names used in the scene.
-        public const string YoungNode = "youngver";
-        public const string YoungShadowNode = "Yshadowver";
-        public const string MiddleNode = "middle";
-        public const string MiddleShadowNode = "Mshadowver";
-        public const string OlderNode = "oldver";
-        public const string OlderShadowNode = "Oshadowver";
+        // The scene can hold several characters (for example Vyte, Aloy, Mokutin, Aerin). Every AnimatedSprite2D that
+        // is NOT a child of another AnimatedSprite2D is a character's young form. Its children are the older forms
+        // ("middle..." and "old...") and the phantom sets (any node with "shad" in its name), found by name.
+        private sealed class Character
+        {
+            public string Name = "";
+            public string[] Node = new string[3];          // young, middle, old  (full node paths)
+            public string[] ShadowNode = new string[3];    // phantom set of each age
+        }
+
+        private static readonly List<Character> characters = new List<Character>();
 
         // Set to false to ignore the Godot scene and go back to the plain strip files.
         public static readonly bool Enabled = true;
@@ -41,7 +45,7 @@ namespace Gui
             ["jump"] = new[] { "jump" },
             ["duck"] = new[] { "duck" },
             ["hurt"] = new[] { "hurt" },
-            ["defeated"] = new[] { "dead" },
+            ["defeated"] = new[] { "dead", "death" },
             ["punch1"] = new[] { "attack1" },
             ["punch2"] = new[] { "attack2" },
             ["kick"] = new[] { "attack3" },
@@ -63,14 +67,17 @@ namespace Gui
 
         private static readonly Dictionary<string, Bitmap?> sheets = new Dictionary<string, Bitmap?>(StringComparer.OrdinalIgnoreCase);
         private static readonly List<string> missing = new List<string>();
+        private static readonly Dictionary<string, string> resolvedFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private static readonly HashSet<string> missingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static List<string>? projectPngs;
         private static List<string>? projectScenes;
         private static bool loadTried;
         private static string status = "";
+        private static string droppedFramesNote = "";
 
         public static bool Available
         {
-            get { EnsureLoaded(); return sets.ContainsKey(YoungNode); }
+            get { EnsureLoaded(); return characters.Count > 0; }
         }
 
         public static string Status
@@ -78,42 +85,66 @@ namespace Gui
             get { EnsureLoaded(); return status; }
         }
 
-        public static string NodeFor(AgeStage age)
+        public static int CharacterCount
         {
-            return age switch
-            {
-                AgeStage.Veteran => MiddleNode,
-                AgeStage.Elder => OlderNode,
-                _ => YoungNode
-            };
+            get { EnsureLoaded(); return characters.Count; }
         }
 
-        /// <summary>How many frames the scene has for a game animation at this age (0 if none).</summary>
-        public static int FrameCount(AgeStage age, string animation)
-        {
-            return FrameCount(NodeFor(age), animation);
-        }
-
-        public static int FrameCount(string node, string animation)
+        // Roster fighter number -> character in the scene (wraps around if the roster is longer than the scene)
+        private static Character? CharacterOf(int fighter)
         {
             EnsureLoaded();
-            if (!sets.TryGetValue(node, out Dictionary<string, List<GodotFrame>>? set)) return 0;
+            if (characters.Count == 0) return null;
+            return characters[((fighter % characters.Count) + characters.Count) % characters.Count];
+        }
+
+        private static string? NodeFor(int fighter, AgeStage age)
+        {
+            return CharacterOf(fighter)?.Node[(int)age];
+        }
+
+        private static string? ShadowNodeFor(int fighter, AgeStage age)
+        {
+            return CharacterOf(fighter)?.ShadowNode[(int)age];
+        }
+
+        /// <summary>How many frames the phantom (shadow) set has for a game animation at this age (0 if none).</summary>
+        public static int ShadowFrameCount(int fighter, AgeStage age, string animation)
+        {
+            return FrameCount(ShadowNodeFor(fighter, age), animation);
+        }
+
+        public static bool TryGetShadowFrame(int fighter, AgeStage age, string animation, int frame, out Bitmap? sheet, out Rectangle source)
+        {
+            return TryGetFrame(ShadowNodeFor(fighter, age), animation, frame, out sheet, out source);
+        }
+
+        /// <summary>How many frames the scene has for a game animation for this fighter at this age (0 if none).</summary>
+        public static int FrameCount(int fighter, AgeStage age, string animation)
+        {
+            return FrameCount(NodeFor(fighter, age), animation);
+        }
+
+        public static bool TryGetFrame(int fighter, AgeStage age, string animation, int frame, out Bitmap? sheet, out Rectangle source)
+        {
+            return TryGetFrame(NodeFor(fighter, age), animation, frame, out sheet, out source);
+        }
+
+        private static int FrameCount(string? node, string animation)
+        {
+            EnsureLoaded();
+            if (node == null || !sets.TryGetValue(node, out Dictionary<string, List<GodotFrame>>? set)) return 0;
             return Find(set, animation)?.Count ?? 0;
         }
 
-        public static bool TryGetFrame(AgeStage age, string animation, int frame, out Bitmap? sheet, out Rectangle source)
-        {
-            return TryGetFrame(NodeFor(age), animation, frame, out sheet, out source);
-        }
-
-        /// <summary>Finds the picture and rectangle to draw for one frame of one animation of one character node.</summary>
-        public static bool TryGetFrame(string node, string animation, int frame, out Bitmap? sheet, out Rectangle source)
+        /// <summary>Finds the picture and rectangle to draw for one frame of one animation of one scene node.</summary>
+        private static bool TryGetFrame(string? node, string animation, int frame, out Bitmap? sheet, out Rectangle source)
         {
             sheet = null;
             source = Rectangle.Empty;
             EnsureLoaded();
 
-            if (!sets.TryGetValue(node, out Dictionary<string, List<GodotFrame>>? set)) return false;
+            if (node == null || !sets.TryGetValue(node, out Dictionary<string, List<GodotFrame>>? set)) return false;
             List<GodotFrame>? frames = Find(set, animation);
             if (frames == null || frames.Count == 0) return false;
 
@@ -135,9 +166,22 @@ namespace Gui
         {
             string key = Normalize(animation);
             string[] candidates = Aliases.TryGetValue(key, out string[]? names) ? names : new[] { key };
+
+            // 1. exact name (walk, idle ...)
             foreach (string candidate in candidates)
             {
                 if (set.TryGetValue(candidate, out List<GodotFrame>? frames) && frames.Count > 0) return frames;
+            }
+
+            // 2. names with a prefix in front, like VWalk, VOwalk, VMidle or VYSattack1.
+            //    Backwards walking is never used as the normal walk.
+            foreach (string candidate in candidates)
+            {
+                foreach (var kv in set)
+                {
+                    if (kv.Value.Count == 0 || kv.Key.Contains("back")) continue;
+                    if (kv.Key.EndsWith(candidate, StringComparison.Ordinal)) return kv.Value;
+                }
             }
             return null;
         }
@@ -170,7 +214,8 @@ namespace Gui
                 if (usedScene == null)
                 {
                     sets.Clear();
-                    status = "no scene with a '" + YoungNode + "' character found (looked for " + string.Join(", ", SceneNames) + ")";
+                    characters.Clear();
+                    status = "no scene with a fighter found (looked for " + string.Join(", ", SceneNames) + ")";
                     return;
                 }
 
@@ -180,16 +225,56 @@ namespace Gui
                     GetSheet(path);
                 }
 
-                int youngAnimations = sets[YoungNode].Count;
-                status = $"LOADED {sets.Count} characters from {Path.GetFileName(usedScene)} (young has {youngAnimations} animations)";
+                // A frame whose rectangle sticks out of its picture (the scene counts more frames than the picture has)
+                // would be drawn mirrored by the tiling mode, so the character seems to look back and forth. Drop those frames.
+                List<string> droppedInfo = new List<string>();
+                foreach (Dictionary<string, List<GodotFrame>> set in sets.Values.Distinct())
+                {
+                    foreach (KeyValuePair<string, List<GodotFrame>> anim in set)
+                    {
+                        int removed = anim.Value.RemoveAll(f =>
+                        {
+                            Bitmap? b = GetSheet(f.Path);
+                            return b != null && (f.Source.X < 0 || f.Source.Y < 0 || f.Source.Right > b.Width || f.Source.Bottom > b.Height);
+                        });
+                        if (removed > 0 && anim.Value.Count > 0)
+                        {
+                            string file = resolvedFiles.TryGetValue(anim.Value[0].Path, out string? rf) ? rf : anim.Value[0].Path;
+                            droppedInfo.Add($"{anim.Key}: {removed} frame(s) outside {Path.GetFileName(file)}");
+                        }
+                    }
+                }
+                if (droppedInfo.Count > 0) droppedFramesNote = "\nDROPPED frames past the end of their picture: " + string.Join("; ", droppedInfo.Take(6));
+
+                status = $"LOADED {characters.Count} characters ({string.Join(", ", characters.Select(c => c.Name))}) from {Path.GetFileName(usedScene)}";
+                status += droppedFramesNote;
                 if (missing.Count > 0)
                 {
                     status += $"\nMISSING {missing.Count} PNG files: " + string.Join(", ", missing.Take(5)) + (missing.Count > 5 ? ", ..." : "");
+
+                    // Say which fighter is affected, so a "wrong character" is easy to trace to its missing pictures
+                    for (int i = 0; i < characters.Count; i++)
+                    {
+                        Character c = characters[i];
+                        List<string> gone = new List<string>();
+                        foreach (string node in c.Node.Concat(c.ShadowNode).Where(n => n != null).Distinct())
+                        {
+                            if (!sets.TryGetValue(node, out Dictionary<string, List<GodotFrame>>? set)) continue;
+                            foreach (string path in set.Values.SelectMany(f => f).Select(f => f.Path).Distinct())
+                            {
+                                if (missingPaths.Contains(path) && !gone.Contains(path)) gone.Add(path);
+                            }
+                        }
+                        if (gone.Count == 0) continue;
+                        string label = i < GameData.Roster.Length ? GameData.Roster[i].Name : c.Name;
+                        status += $"\n  {label}: {gone.Count} picture(s) not found, for example {gone[0]}";
+                    }
                 }
             }
             catch (Exception ex)
             {
                 sets.Clear();
+                characters.Clear();
                 status = "failed to read scene: " + ex.Message;
             }
         }
@@ -197,6 +282,7 @@ namespace Gui
         private static bool TryParseScene(string scenePath)
         {
             sets.Clear();
+            characters.Clear();
             string text = File.ReadAllText(scenePath);
 
             // ext_resource: id -> picture path inside the Godot project, e.g. res://fighter_all_sets/young/Duck.png
@@ -239,17 +325,72 @@ namespace Gui
                 frameSets[block.Groups[1].Value] = animations;
             }
 
-            // Nodes: AnimatedSprite2D name -> its SpriteFrames
+            // Nodes: every AnimatedSprite2D, keyed by its full path (names repeat between characters, paths do not)
+            List<(string Path, string Name, string Parent)> sprites = new List<(string, string, string)>();
             foreach (Match n in Regex.Matches(text,
-                @"\[node name=""([^""]+)"" type=""AnimatedSprite2D""[^\]]*\]([^\[]*?)sprite_frames = SubResource\(""([^""]+)""\)"))
+                @"\[node name=""([^""]+)"" type=""AnimatedSprite2D""(?: parent=""([^""]*)"")?[^\]]*\]([^\[]*?)sprite_frames = SubResource\(""([^""]+)""\)"))
             {
-                if (frameSets.TryGetValue(n.Groups[3].Value, out Dictionary<string, List<GodotFrame>>? animations))
-                {
-                    sets[n.Groups[1].Value] = animations;
-                }
+                if (!frameSets.TryGetValue(n.Groups[4].Value, out Dictionary<string, List<GodotFrame>>? animations)) continue;
+
+                string name = n.Groups[1].Value;
+                string parent = n.Groups[2].Value;
+                string path = (parent == "" || parent == ".") ? name : parent + "/" + name;
+                sets[path] = animations;
+                sprites.Add((path, name, parent));
             }
 
-            return sets.ContainsKey(YoungNode);
+            // Characters. The scene lays them out in one of two ways:
+            //   Vyte / (middle, oldver as children of Vyte)      - older forms are children of the young form
+            //   Aloy, middle, old (all under one Node2D)         - older forms are siblings of the young form
+            // Either way the first non-shadow sprite of a group is the young form, a name starting with "m" is the middle
+            // form, one starting with "o" the old form, and any node with "shad" in its name is a phantom set.
+            HashSet<string> spritePaths = new HashSet<string>(sprites.Select(x => x.Path), StringComparer.OrdinalIgnoreCase);
+            foreach (var group in sprites.Where(x => !spritePaths.Contains(x.Parent) && !IsShadow(x.Name)).GroupBy(x => x.Parent))
+            {
+                var members = group.ToList();
+                bool grouped = group.Key != "" && group.Key != ".";
+                Character c = new Character { Name = grouped ? group.Key : members[0].Name };
+
+                // The young form, plus any older forms that sit beside it or under it
+                List<(string Path, string Name, string Parent)> candidates = new List<(string, string, string)>(members);
+                candidates.AddRange(sprites.Where(x => string.Equals(x.Parent, members[0].Path, StringComparison.OrdinalIgnoreCase) && !IsShadow(x.Name)));
+                foreach (var cand in candidates)
+                {
+                    int age = AgeOfName(cand.Name);
+                    if (c.Node[age] == null) c.Node[age] = cand.Path;
+                }
+                c.Node[0] ??= members[0].Path;
+
+                // A missing older form just keeps showing the form before it
+                for (int i = 1; i < 3; i++) c.Node[i] ??= c.Node[i - 1];
+                for (int i = 0; i < 3; i++) c.ShadowNode[i] = FindShadowChild(sprites, c.Node[i]) ?? c.Node[i];
+                characters.Add(c);
+            }
+
+            return characters.Count > 0;
+        }
+
+        // Node names such as Vyoung / Vmiddle / Voldver, ALyoung / ALmiddle / ALold, Mmiddle, Mold, AEold ...
+        private static int AgeOfName(string name)
+        {
+            string n = name.ToLowerInvariant();
+            if (n.Contains("old") || n.Contains("elder")) return 2;
+            if (n.Contains("mid")) return 1;
+            return 0;
+        }
+
+        private static bool IsShadow(string name)
+        {
+            return name.IndexOf("shad", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string? FindShadowChild(List<(string Path, string Name, string Parent)> sprites, string parentPath)
+        {
+            foreach (var x in sprites)
+            {
+                if (string.Equals(x.Parent, parentPath, StringComparison.OrdinalIgnoreCase) && IsShadow(x.Name)) return x.Path;
+            }
+            return null;
         }
 
         private static int ToInt(Group group)
@@ -298,6 +439,7 @@ namespace Gui
 
             Bitmap? bitmap = null;
             string? file = ResolvePath(resPath);
+            if (file != null) resolvedFiles[resPath] = file;
             if (file != null)
             {
                 try { bitmap = ToFastBitmap(new Bitmap(file)); }
@@ -308,6 +450,7 @@ namespace Gui
             {
                 string name = Path.GetFileName(resPath);
                 if (!missing.Contains(name)) missing.Add(name);
+                missingPaths.Add(resPath);
             }
 
             sheets[resPath] = bitmap;
@@ -347,17 +490,36 @@ namespace Gui
                 catch { projectPngs = new List<string>(); }
             }
 
-            // Same folder ending anywhere in the project
+            // The fighter's own folder (Vyte, Aloy, Mokutin, Aerin). The scene still remembers the old folder names
+            // (Samurai, Fighter_Sprites_Complete, Book_Girl_Sprites_Complete ...), so those are mapped to the new ones.
+            string? inOwnFolder = FindInCharacterFolder(resPath, projectPngs);
+            if (inOwnFolder != null) return inOwnFolder;
+
+            // The same path ending anywhere in the project. The full path is tried first, then shorter endings
+            // (so "Samurai/Samurai_Sprites_Complete/Samurai_Sprites_Complete/young/normal/Idle.png" still finds
+            // ".../Samurai_Sprites_Complete/young/normal/Idle.png"). A shorter ending always keeps the age folder
+            // (young / middle_age / elderly) and must sit inside the character's own top folder, so one fighter
+            // never borrows another fighter's picture and one age never borrows another age's.
             if (!rootFile)
             {
-                foreach (string p in projectPngs)
+                string[] parts = resPath.Split('/');
+                string topFolder = "/" + parts[0] + "/";
+                int minKeep = Math.Min(parts.Length, 3);
+                for (int keep = parts.Length; keep >= minKeep; keep--)
                 {
-                    if (p.Replace('\\', '/').EndsWith("/" + resPath, StringComparison.OrdinalIgnoreCase)) return p;
+                    string tail = "/" + string.Join("/", parts.Skip(parts.Length - keep));
+                    foreach (string p in projectPngs)
+                    {
+                        string normalized = p.Replace('\\', '/');
+                        if (!normalized.EndsWith(tail, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (keep < parts.Length && normalized.IndexOf(topFolder, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                        return p;
+                    }
                 }
             }
 
-            // Young fighter pictures: same file name anywhere under a "young" folder (never guess another age).
-            if (rootFile || resPath.Contains("/young/"))
+            // Young Vyte pictures: same file name anywhere under his own "young" folder (never guess another age or fighter).
+            if (rootFile || resPath.StartsWith("fighter_all_sets/young/", StringComparison.OrdinalIgnoreCase))
             {
                 string? inYoung = null;
                 foreach (string p in projectPngs)
@@ -365,6 +527,7 @@ namespace Gui
                     string normalized = p.Replace('\\', '/');
                     if (!string.Equals(Path.GetFileName(p), fileName, StringComparison.OrdinalIgnoreCase)) continue;
                     if (!normalized.Contains("/young/")) continue;
+                    if (IsOtherFighterFolder(normalized)) continue;
                     if (!normalized.Contains("/shadow_mechanic/")) return p;
                     inYoung ??= p;
                 }
@@ -372,6 +535,72 @@ namespace Gui
             }
 
             return null;
+        }
+
+        // Old folder names used inside Plater.tscn -> the roster folder that holds that fighter's pictures now
+        private static readonly Dictionary<string, string> FolderOwner = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["fighter_all_sets"] = "Vyte",
+            ["Vyte"] = "Vyte",
+            ["Fighter_Sprites_Complete"] = "Aloy",
+            ["Aloy"] = "Aloy",
+            ["Samurai"] = "Mokutin",
+            ["Mokutin"] = "Mokutin",
+            ["Book_Girl_Sprites_Complete"] = "Aerin",
+            ["Girl_3"] = "Aerin",
+            ["Aerin"] = "Aerin"
+        };
+
+        private static readonly string[] FighterFolders = { "Vyte", "Aloy", "Mokutin", "Aerin" };
+
+        private static bool IsOtherFighterFolder(string normalizedPath)
+        {
+            return FighterFolders.Any(f => normalizedPath.IndexOf("/" + f + "/", StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static bool AgeMatches(string normalizedPath, string age)
+        {
+            string n = normalizedPath.ToLowerInvariant();
+            return age switch
+            {
+                "middle" => n.Contains("/middle_age/") || n.Contains("/middle/"),
+                "elder" => n.Contains("/elderly/") || n.Contains("/older/") || n.Contains("/old/"),
+                _ => n.Contains("/young/")
+            };
+        }
+
+        /// <summary>
+        /// Finds a picture by who owns it, the age and the file name, inside that fighter's own folder, e.g.
+        /// "Samurai/.../elderly/normal/Walk.png" -> ".../Mokutin/Mokutin/elderly/Walk.png". Phantom pictures stay phantom
+        /// pictures, normal ones stay normal.
+        /// </summary>
+        private static string? FindInCharacterFolder(string resPath, List<string> pngs)
+        {
+            string[] parts = resPath.Split('/');
+            string? owner = null;
+            if (parts.Length == 1) owner = "Vyte";                         // pictures at the Godot project root are Vyte's
+            else if (FolderOwner.TryGetValue(parts[0], out string? o)) owner = o;
+            if (owner == null) return null;
+
+            string lower = resPath.ToLowerInvariant();
+            string age = (lower.Contains("middle")) ? "middle" : (lower.Contains("elder") || lower.Contains("/older/") || lower.Contains("/old/")) ? "elder" : "young";
+            bool wantShadow = lower.Contains("shadow");
+            string fileName = parts[parts.Length - 1];
+
+            string? best = null;
+            int bestScore = int.MinValue;
+            foreach (string p in pngs)
+            {
+                if (!string.Equals(Path.GetFileName(p), fileName, StringComparison.OrdinalIgnoreCase)) continue;
+                string n = p.Replace('\\', '/');
+                if (n.IndexOf("/" + owner + "/", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                if (!AgeMatches(n, age)) continue;
+                if ((n.IndexOf("shadow", StringComparison.OrdinalIgnoreCase) >= 0) != wantShadow) continue;
+
+                int score = (n.Contains("/normal/", StringComparison.OrdinalIgnoreCase) ? 100 : 0) - n.Length;
+                if (score > bestScore) { bestScore = score; best = p; }
+            }
+            return best;
         }
 
         private static Bitmap ToFastBitmap(Bitmap original)
